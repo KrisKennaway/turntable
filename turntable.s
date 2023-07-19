@@ -28,7 +28,7 @@ PHASE1STATE = $00 ; .. $01
 ZPDUMMY = $02
 loopctr = $03
 
-LOOP_OUTER = 120
+LOOP_OUTER = 100
 
 ; internal buffers
 STEP_TABLE = $4000
@@ -130,7 +130,39 @@ make_phase1_state_table:
 ; Prepare to begin
 prepare:
     ; enable phase 0
-	LDA PHASE0ON
+    LDA PHASE0ON
+
+    LDA PHASE1OFF
+    LDA PHASE2OFF
+    LDA PHASE3OFF
+
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+    LDA #$FF
+    JSR WAIT
+
     ; phase 1 is off to begin with
     LDA #>PHASE1OFF
     STA PHASE1STATE+1
@@ -139,24 +171,85 @@ prepare:
 
     LDA #$00
     STA loopctr
-	; start outer loop, counts from 194..0
-	LDX #LOOP_OUTER
 
-    ; start writing
+    ; JMP prepare_read
+
+prepare_write:
+    ; start writing 40-cycle FF sync bytes
     LDA #$FF
     LDY #$60
+    LDX #$50  ; number of sync bytes to write
     STA WRITEBASE,Y 
     CMP SHIFTBASE,Y
-    STA ZPDUMMY
 
+; 40 - 9 = 31 cycles
+    STA ZPDUMMY
+    NOP
+@0:
     NOP
     NOP
-    STA ZPDUMMY
-    ; 20 more cycles until next STA SHIFTBASE,Y
-    ; 13 for write_nibble1
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
 
-diskloop:
+    STA LOADBASE,Y
+    CMP SHIFTBASE,Y
+    DEX
+    BNE @0 ; XXX BPL
+
+    ; write header
+    ; 17 cycles
+    STA ZPDUMMY
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+
+    LDA #$D5
+    STA LOADBASE,Y
+    CMP SHIFTBASE,Y
+
+    ; 21 cycles
+    STA ZPDUMMY
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+
+    LDA #$AA
+    STA LOADBASE,Y
+    CMP SHIFTBASE,Y
+
+	; start outer loop, counts from (LOOP_OUTER-1) .. 0
+	LDX #LOOP_OUTER
+
+    ; pad to 32 cycles until the next disk STA/CMP in write_nibble
+    NOP
+    NOP
+    NOP
+    NOP
+
+disk_write_loop:
 	DEX ; 2
+    LDA READ
+    LDA MOTOROFF
+    BRK;
 	BNE write_nibble ; 2/3
 
 	; X=0
@@ -169,7 +262,99 @@ diskloop:
 	STX PHASE1STATE ; 3
 
 	LDX #LOOP_OUTER ; 2 reset inner loop counter1
-	BNE diskloop ; 3 always
+	BNE disk_write_loop ; 3 always
+
+; need to turn off phase 1 around all writes because the Disk II hardware suppresses writes if it is enabled
+; 27 cycles + 5 main loop = 32
+write_nibble:
+	LDA PHASE1OFF ; 4 ; don't interfere with writes
+
+	LDA #$EE ; 2
+	LDY #$60 ; 2 XXX try Y=0
+	STA LOADBASE,Y ; 5
+	CMP SHIFTBASE,Y ; 4
+
+    ; reassert the current phase 1 state
+    LDY #$00 ; 2 XXX
+	LDA (PHASE1STATE),Y ; 5 Y=0
+	JMP disk_write_loop ; 3
+
+prepare_read:
+	; start outer loop, counts from (LOOP_OUTER-1) .. 0
+	LDX #LOOP_OUTER
+    LDA READ
+
+    LDY #$60 ; XXX
+
+    ; sync to track start
+@startsync:
+    LDA SHIFTBASE,Y ; XXX
+    BPL @startsync
+    STA $400
+@tryd5:
+    EOR #$D5
+    BNE @startsync
+
+@tryaa:
+    LDA SHIFTBASE,Y ; XXX
+    BPL @tryaa
+    CMP #$AA
+    STA $401
+    BNE @tryd5
+    BRK
+
+    ; pad to 32 cycles (32-9 = 23 cycles)
+    STA ZPDUMMY
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+
+disk_read_loop:
+    DEX ; 2
+	BNE read_nibble ; 2/3
+
+	; X=0
+	INC loopctr ; 5
+	LDY loopctr ; 3
+	LDX STEP_TABLE,Y ; 4
+	LDA $C000,X ; 4 toggle next phase switch
+
+    LDX PHASE1STATE_TABLE,Y ; 4
+	STX PHASE1STATE ; 3
+
+	LDX #LOOP_OUTER ; 2 reset inner loop counter1
+	BNE disk_read_loop ; 3 always
+
+read_nibble:
+    LDA SHIFT
+    CMP #$EE ; 2
+    BNE lost_sync ; 2 / 3
+
+    ; pad to 32 cycles (32 - 9 - 3 = 20 cycles)
+
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+
+    JMP disk_read_loop
+
+lost_sync:
+    LDA MOTOROFF
+    BRK
 
 ;read_nibble:
 ;	NOP
@@ -191,19 +376,4 @@ diskloop:
 ; phase path:
 ; 2+2+5+3+4+4+2+2+2+3+3 = 32
 
-; need to turn off phase 1 around all writes because the Disk II hardware suppresses writes if it is enabled
-; 27 cycles + 5 main loop = 32
-write_nibble:
-	LDA PHASE1OFF ; 4 ; don't interfere with writes
-
-	LDA #$FF ; 2
-	LDY #$60 ; 2 XXX try Y=0
-	STA LOADBASE,Y ; 5
-	CMP SHIFTBASE,Y ; 4
-
-    ; reassert the current phase 1 state
-    LDY #$00 ; 2 XXX
-	LDA (PHASE1STATE),Y ; 5 Y=0
-	JMP diskloop ; 3
-	
-    .endproc
+.endproc
