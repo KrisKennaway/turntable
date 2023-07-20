@@ -171,86 +171,6 @@ prepare:
 
     ;LDA PHASE1OFF ; XXX
 
-    ; JSR write_track
-    ;JSR read_track
-    ;BRK
-
-    jmp cont
-
-write_track:
-    LDA #$f5
-    STA $FC
-    LDX #$60
-    LDA LOADBASE,X
-    LDA READBASE,X
-    BMI error
-    LDA #$FF
-    STA WRITEBASE,X
-    CMP SHIFTBASE,X
-    LDA $20
-    LDY #$FF
-    TYA
-delay1:
-    PHA
-    PLA
-delay2:
-    JSR wnib7
-    DEY
-    BNE delay1
-    INC $FC
-    BNE delay2
-    NOP
-    NOP
-    NOP
-    LDA #$D5
-    JSR wnibl
-    LDA #$AA
-    JSR wnib9
-    LDA #$FF ; XXX write an extra byte to be sure
-    JSR wnib9
-    LDA READBASE, X
-    LDA SHIFTBASE, X ; XXX "completes transition to read mode"
-    ; LDA MOTOROFFBASE, X
-    RTS
-wnib9: CLC
-wnib7: PHA
-    PLA
-wnibl: STA $c08d,X
-    ora SHIFTBASE,X
-    RTS
-error: brk
-
-read_track:
-    ldx #$60
-    lda MOTORONBASE,x
-    lda READBASE,x
-
-@loop:
-    ldy #$5
-@read:
-    lda SHIFTBASE,x
-    bpl @read
-    cmp #$FF
-    bne @loop
-    dey
-    bne @read
-@1:
-    lda SHIFTBASE,X
-    bpl @1
-@read1:
-    cmp #$d5
-    NOP
-    bne @1
-@read2: lda SHIFTBASE,X
-    bpl @read2
-    eor #$aa
-    bne @read1
-    jsr $fbe4 ; bell
-    lda MOTOROFFBASE,X
-    rts
-
-
-cont:
     ; phase 1 is off to begin with
     LDA #>PHASE1OFF
     STA PHASE1STATE+1
@@ -260,14 +180,16 @@ cont:
     LDA #$00
     STA loopctr
 
-    ; JMP prepare_read
+    JMP prepare_read
 
     LDY #$60
     
     LDA LOADBASE,Y
     LDA READBASE,Y
-    BMI error
+    BPL @noerror
+    BRK
 
+@noerror:
     STA WRITEBASE,Y 
     CMP SHIFTBASE,Y
     STA ZPDUMMY
@@ -326,43 +248,6 @@ prepare_write:
     ; 9 + 6
     LDA #$AA ; 2
     JSR write_nibble9 ; 6 + 9
-;    LDA #$96 ; 2
-;    JSR write_nibble9 ; 6 + 9
-;    LDA #$FF ; 2
-;    JSR write_nibble9 ; 6 + 9
-;    LDA #$FE ; 2
-;    JSR write_nibble9 ; 6 + 9
-;
-;    LDA #$AA ; 2
-;    JSR write_nibble9 ; 6 + 9
-;    LDA #$AA ; 2
-;    JSR write_nibble9 ; 6 + 9
-;    LDA #$AE ; 2
-;    JSR write_nibble9 ; 6 + 9
-;    LDA #$AB ; 2
-;    JSR write_nibble9 ; 6 + 9
-;    LDA #$FB ; 2
-;    JSR write_nibble9 ; 6 + 9
-;    LDA #$FF ; 2
-;    JSR write_nibble9 ; 6 + 9
-;    LDA #$DE ; 2
-;    JSR write_nibble9 ; 6 + 9
-;    LDA #$AA ; 2
-;    JSR write_nibble9 ; 6 + 9
-;    LDA #$EB ; 2
-;    JSR write_nibble9 ; 6 + 9
-;
-;    LDA #$00 ; 2
-;    JSR write_nibble9 ; 6 + 9
-;
-;    LDA READ
-;    LDA SHIFTBASE
-;    
-
-    ; !!! 
-    JMP prepare_read
-    ;LDA MOTOROFF
-    ;BRK
 
     ; 9 + 6 cycles from RTS
 	; start outer loop, counts from (LOOP_OUTER-1) .. 0
@@ -447,26 +332,10 @@ prepare_read:
     STA $401 ; 4
     BNE @tryd5 ; 2/3
 
-;@read_nibble:
-;    LDA SHIFTBASE,Y ; 4
-;    BPL @read_nibble
-;    STA $500,X ; 5
-;    DEX
-;    BNE @read_nibble
-;    BEQ lost_sync
-;
-
-    ; pad to 32 cycles
-    STA ZPDUMMY
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-
 disk_read_loop:
     DEX ; 2
 	BNE read_nibble ; 2/3
+    BRK
 
 	; X=0
 	INC loopctr ; 5
@@ -484,8 +353,8 @@ read_nibble:
     LDA SHIFTBASE,Y ; 4
     bpl read_nibble
     STA $400,X ; 5
-    CMP #$EE ; 2
-    BNE lost_sync ; 2 / 3
+    ;CMP #$EE ; 2
+    ;BNE lost_sync ; 2 / 3
 
     JMP disk_read_loop ; 3
 
