@@ -253,7 +253,6 @@ prepare_write:
 
 disk_write_loop:
 	DEX ; 2
-
 	BNE write_nibble ; 2/3
 
 	; X=0
@@ -266,6 +265,7 @@ disk_write_loop:
 	STX PHASE1STATE ; 3
 
 	LDX #LOOP_OUTER ; 2 reset inner loop counter1
+        ; XXX could fall through
 	BNE disk_write_loop ; 3 always
 
 ; need to turn off phase 1 around all writes because the Disk II hardware suppresses writes if it is enabled
@@ -328,10 +328,7 @@ prepare_read:
     STA $401 ; 4
     BNE @tryd5 ; 2/3
 
-    NOP
-    NOP
-    NOP
-    NOP
+    STA ZPDUMMY
     NOP
     NOP
     NOP
@@ -339,40 +336,41 @@ prepare_read:
     NOP
 
 disk_read_loop:
-    LDA SHIFT ; 4
-
-@buffer:
-    STA $5000,X ; 5
-    LDA @buffer+2 ; 4
-    CMP #$80
-    BEQ done
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-
-    DEX
-    BNE disk_read_loop
-
-    ; 31 cycles so far because BNE fell through
+	DEX ; 2
+	BNE read_nibble ; 2/3
 
 	; X=0
 	INC loopctr ; 5
-	LDY loopctr ; 3
+	LDY a:loopctr ; 4 ; !! 1 cycle delayed compared to write
 	LDX STEP_TABLE,Y ; 4
 	LDA $C000,X ; 4 toggle next phase switch
 
-    INC @buffer+2 ; 6
+    INC buffer+2 ; 6
 
-    NOP
-    NOP
-    NOP
+    ; LDX PHASE1STATE_TABLE,Y ; 4
+	; STX PHASE1STATE ; 3
 
 	LDX #LOOP_OUTER ; 2 reset inner loop counter1
-    BNE disk_read_loop ; 3 always
+    ; XXX could fall through
+	BNE disk_read_loop ; 3 always
+
+read_nibble:
+    LDA SHIFT ; 4
+
+buffer:
+    STA $5000,X ; 5
+    LDA buffer+2 ; 4
+    CMP #$80 ; 2
+    BEQ done ; 2
+
+    STA ZPDUMMY
+    NOP
+    NOP
+
+    BNE disk_read_loop
 
 done:
+    STA MOTOROFF
     BRK
 
 ; bit slips
