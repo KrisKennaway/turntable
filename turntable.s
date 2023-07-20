@@ -30,7 +30,7 @@ WRITEBASE = $C08F
 ; TODO: use unused addresses
 PHASE1STATE = $00 ; .. $01
 ZPDUMMY = $02
-loopctr = $03
+loopctr = $03 ; .. $04
 
 LOOP_OUTER = 120
 
@@ -340,13 +340,12 @@ prepare_read:
 
 disk_read_loop:
     LDA SHIFT ; 4
-    STA $400,X ; 5
-    BPL @0 ; slipped a bit, add an extra cycle to catch up
 
-@0:
-    NOP
-    NOP
-    NOP
+@buffer:
+    STA $5000,X ; 5
+    LDA @buffer+2 ; 4
+    CMP #$80
+    BEQ done
     NOP
     NOP
     NOP
@@ -356,7 +355,7 @@ disk_read_loop:
     DEX
     BNE disk_read_loop
 
-    ; 31 cycles so far
+    ; 31 cycles so far because BNE fell through
 
 	; X=0
 	INC loopctr ; 5
@@ -364,21 +363,29 @@ disk_read_loop:
 	LDX STEP_TABLE,Y ; 4
 	LDA $C000,X ; 4 toggle next phase switch
 
+    INC @buffer+2 ; 6
+
+    NOP
+    NOP
+    NOP
+
 	LDX #LOOP_OUTER ; 2 reset inner loop counter1
+    BNE disk_read_loop ; 3 always
 
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-
-	BNE disk_read_loop ; 3 always
+done:
+    BRK
 
 ; bit slips
 ; n' = 0b11101110 = 0xee
 ; w  = 0b1110111
 ; ;  = 0b111011
+
+
+; n' = 0b11101110
+; Z' = 0b11011010
+; R' = 0b11010010
+; W' = 0b11010111
+
 
 ;read_nibble:
 ;	NOP
