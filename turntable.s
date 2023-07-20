@@ -171,14 +171,14 @@ prepare:
 
     ;LDA PHASE1OFF ; XXX
 
-    JSR write_track
+    ; JSR write_track
+    ;JSR read_track
+    ;BRK
 
-    JSR read_track
-    BRK
+    jmp cont
 
 write_track:
-; XXX
-    LDA #$e0
+    LDA #$f5
     STA $FC
     LDX #$60
     LDA LOADBASE,X
@@ -206,11 +206,11 @@ delay2:
     JSR wnibl
     LDA #$AA
     JSR wnib9
-    LDA #$FF
+    LDA #$FF ; XXX write an extra byte to be sure
     JSR wnib9
     LDA READBASE, X
-    LDA SHIFTBASE, X ; "completes transition to read mode"
-    LDA MOTOROFFBASE, X
+    LDA SHIFTBASE, X ; XXX "completes transition to read mode"
+    ; LDA MOTOROFFBASE, X
     RTS
 wnib9: CLC
 wnib7: PHA
@@ -226,7 +226,7 @@ read_track:
     lda READBASE,x
 
 @loop:
-    ldy #$FF
+    ldy #$5
 @read:
     lda SHIFTBASE,x
     bpl @read
@@ -249,6 +249,8 @@ read_track:
     lda MOTOROFFBASE,X
     rts
 
+
+cont:
     ; phase 1 is off to begin with
     LDA #>PHASE1OFF
     STA PHASE1STATE+1
@@ -258,10 +260,14 @@ read_track:
     LDA #$00
     STA loopctr
 
-    JMP prepare_read
+    ; JMP prepare_read
 
     LDY #$60
     
+    LDA LOADBASE,Y
+    LDA READBASE,Y
+    BMI error
+
     STA WRITEBASE,Y 
     CMP SHIFTBASE,Y
     STA ZPDUMMY
@@ -278,6 +284,7 @@ prepare_write:
     ; start writing 40-cycle FF sync bytes
     LDA #$FF
     LDY #$60
+
     LDX #$FF  ; number of sync bytes to write
     STA LOADBASE,Y 
     CMP SHIFTBASE,Y
@@ -306,6 +313,12 @@ prepare_write:
     BNE @0
 
     ; write header
+    NOP
+
+    ; make sure this is a FF40 too
+    NOP
+    NOP
+    NOP
     NOP
 
     LDA #$D5
@@ -339,9 +352,15 @@ prepare_write:
     LDA #$EB ; 2
     JSR write_nibble9 ; 6 + 9
 
+    LDA #$00 ; 2
+    JSR write_nibble9 ; 6 + 9
+
     LDA READ
-    LDA MOTOROFF
-    BRK
+    LDA SHIFTBASE
+    
+    JMP prepare_read
+    ;LDA MOTOROFF
+    ;BRK
 
     ; 9 + 6 cycles from RTS
 	; start outer loop, counts from (LOOP_OUTER-1) .. 0
@@ -395,6 +414,18 @@ prepare_read:
     LDA READ
 
     LDY #$60 ; XXX
+
+@loop:
+    ldx #$5
+@read:
+    lda SHIFTBASE,y
+    bpl @read
+    INC $600
+    STA $601
+    cmp #$FF
+    bne @loop
+    dex
+    bne @read
 
     ; sync to track start
 @startsync:
