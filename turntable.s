@@ -326,38 +326,40 @@ prepare_write:
     ; 9 + 6
     LDA #$AA ; 2
     JSR write_nibble9 ; 6 + 9
-    LDA #$96 ; 2
-    JSR write_nibble9 ; 6 + 9
-    LDA #$FF ; 2
-    JSR write_nibble9 ; 6 + 9
-    LDA #$FE ; 2
-    JSR write_nibble9 ; 6 + 9
+;    LDA #$96 ; 2
+;    JSR write_nibble9 ; 6 + 9
+;    LDA #$FF ; 2
+;    JSR write_nibble9 ; 6 + 9
+;    LDA #$FE ; 2
+;    JSR write_nibble9 ; 6 + 9
+;
+;    LDA #$AA ; 2
+;    JSR write_nibble9 ; 6 + 9
+;    LDA #$AA ; 2
+;    JSR write_nibble9 ; 6 + 9
+;    LDA #$AE ; 2
+;    JSR write_nibble9 ; 6 + 9
+;    LDA #$AB ; 2
+;    JSR write_nibble9 ; 6 + 9
+;    LDA #$FB ; 2
+;    JSR write_nibble9 ; 6 + 9
+;    LDA #$FF ; 2
+;    JSR write_nibble9 ; 6 + 9
+;    LDA #$DE ; 2
+;    JSR write_nibble9 ; 6 + 9
+;    LDA #$AA ; 2
+;    JSR write_nibble9 ; 6 + 9
+;    LDA #$EB ; 2
+;    JSR write_nibble9 ; 6 + 9
+;
+;    LDA #$00 ; 2
+;    JSR write_nibble9 ; 6 + 9
+;
+;    LDA READ
+;    LDA SHIFTBASE
+;    
 
-    LDA #$AA ; 2
-    JSR write_nibble9 ; 6 + 9
-    LDA #$AA ; 2
-    JSR write_nibble9 ; 6 + 9
-    LDA #$AE ; 2
-    JSR write_nibble9 ; 6 + 9
-    LDA #$AB ; 2
-    JSR write_nibble9 ; 6 + 9
-    LDA #$FB ; 2
-    JSR write_nibble9 ; 6 + 9
-    LDA #$FF ; 2
-    JSR write_nibble9 ; 6 + 9
-    LDA #$DE ; 2
-    JSR write_nibble9 ; 6 + 9
-    LDA #$AA ; 2
-    JSR write_nibble9 ; 6 + 9
-    LDA #$EB ; 2
-    JSR write_nibble9 ; 6 + 9
-
-    LDA #$00 ; 2
-    JSR write_nibble9 ; 6 + 9
-
-    LDA READ
-    LDA SHIFTBASE
-    
+    ; !!! 
     JMP prepare_read
     ;LDA MOTOROFF
     ;BRK
@@ -427,6 +429,8 @@ prepare_read:
     dex
     bne @read
 
+	LDX #LOOP_OUTER ; XXX
+
     ; sync to track start
 @startsync:
     LDA SHIFTBASE,Y ; XXX
@@ -443,13 +447,14 @@ prepare_read:
     STA $401 ; 4
     BNE @tryd5 ; 2/3
 
-@read_nibble:
-    LDA SHIFTBASE,Y ; 4
-    BPL @read_nibble
-    STA $500,X ; 5
-    DEX
-    BNE @read_nibble
-    BEQ lost_sync
+;@read_nibble:
+;    LDA SHIFTBASE,Y ; 4
+;    BPL @read_nibble
+;    STA $500,X ; 5
+;    DEX
+;    BNE @read_nibble
+;    BEQ lost_sync
+;
 
     ; pad to 32 cycles
     STA ZPDUMMY
@@ -477,16 +482,10 @@ disk_read_loop:
 
 read_nibble:
     LDA SHIFTBASE,Y ; 4
+    bpl read_nibble
     STA $400,X ; 5
     CMP #$EE ; 2
     BNE lost_sync ; 2 / 3
-
-    ; pad to 32 cycles
-    STA ZPDUMMY
-    NOP
-    NOP
-    NOP
-    NOP
 
     JMP disk_read_loop ; 3
 
