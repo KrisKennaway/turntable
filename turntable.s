@@ -32,7 +32,7 @@ PHASE1STATE = $00 ; .. $01
 ZPDUMMY = $02
 loopctr = $03
 
-LOOP_OUTER = 50
+LOOP_OUTER = 120
 
 ; internal buffers
 STEP_TABLE = $4000
@@ -134,12 +134,10 @@ make_phase1_state_table:
 ; Prepare to begin
 prepare:
     ; enable phase 0
-    LDA PHASE0OFF
+    LDA PHASE0ON
     LDA PHASE1OFF
     LDA PHASE2OFF
     LDA PHASE3OFF
-
-    ; LDA PHASE1ON ; XXX
 
     ; settle
     LDA #$FF
@@ -168,8 +166,6 @@ prepare:
     JSR WAIT
     LDA #$FF
     JSR WAIT
-
-    ;LDA PHASE1OFF ; XXX
 
     ; phase 1 is off to begin with
     LDA #>PHASE1OFF
@@ -333,9 +329,15 @@ prepare_read:
     BNE @tryd5 ; 2/3
 
 disk_read_loop:
-    DEX ; 2
-	BNE read_nibble ; 2/3
-    BRK
+    LDA SHIFT ; 4
+    bpl disk_read_loop ; 2/3
+    CMP #$EE
+    BEQ @0
+    STA $C030
+
+@0:
+    DEX
+    BNE disk_read_loop ; 3
 
 	; X=0
 	INC loopctr ; 5
@@ -343,24 +345,8 @@ disk_read_loop:
 	LDX STEP_TABLE,Y ; 4
 	LDA $C000,X ; 4 toggle next phase switch
 
-    LDX PHASE1STATE_TABLE,Y ; 4
-	STX PHASE1STATE ; 3
-
 	LDX #LOOP_OUTER ; 2 reset inner loop counter1
 	BNE disk_read_loop ; 3 always
-
-read_nibble:
-    LDA SHIFTBASE,Y ; 4
-    bpl read_nibble
-    STA $400,X ; 5
-    ;CMP #$EE ; 2
-    ;BNE lost_sync ; 2 / 3
-
-    JMP disk_read_loop ; 3
-
-lost_sync:
-    STA MOTOROFF
-    BRK
 
 ;read_nibble:
 ;	NOP
