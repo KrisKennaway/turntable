@@ -328,16 +328,35 @@ prepare_read:
     STA $401 ; 4
     BNE @tryd5 ; 2/3
 
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+
 disk_read_loop:
     LDA SHIFT ; 4
-    bpl disk_read_loop ; 2/3
-    CMP #$EE
-    BEQ @0
-    STA $C030
+    STA $400,X ; 5
+    BPL @0 ; slipped a bit, add an extra cycle to catch up
 
 @0:
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+
     DEX
-    BNE disk_read_loop ; 3
+    BNE disk_read_loop
+
+    ; 31 cycles so far
 
 	; X=0
 	INC loopctr ; 5
@@ -346,7 +365,20 @@ disk_read_loop:
 	LDA $C000,X ; 4 toggle next phase switch
 
 	LDX #LOOP_OUTER ; 2 reset inner loop counter1
+
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+
 	BNE disk_read_loop ; 3 always
+
+; bit slips
+; n' = 0b11101110 = 0xee
+; w  = 0b1110111
+; ;  = 0b111011
 
 ;read_nibble:
 ;	NOP
