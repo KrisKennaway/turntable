@@ -18,8 +18,12 @@ SHIFT       = $C08C+SLOTn0
 READ        = $C08E+SLOTn0
 WRITE       = $c08F+SLOTn0
 
+
+MOTOROFFBASE = $c088
+MOTORONBASE = $c089
 SHIFTBASE = $C08C
 LOADBASE = $c08D
+READBASE = $c08e
 WRITEBASE = $C08F
 
 ; zero page
@@ -177,12 +181,12 @@ write_track:
     LDA #$e0
     STA $FC
     LDX #$60
-    LDA $c08d,X
-    LDA $c08E,X
+    LDA LOADBASE,X
+    LDA READBASE,X
     BMI error
     LDA #$FF
-    STA $C08F,X
-    CMP $C08C,X
+    STA WRITEBASE,X
+    CMP SHIFTBASE,X
     LDA $20
     LDY #$FF
     TYA
@@ -204,45 +208,45 @@ delay2:
     JSR wnib9
     LDA #$FF
     JSR wnib9
-    LDA $c08E, X
-    LDA $c08C, X
-    LDA $c088, X
+    LDA READBASE, X
+    LDA SHIFTBASE, X ; "completes transition to read mode"
+    LDA MOTOROFFBASE, X
     RTS
 wnib9: CLC
 wnib7: PHA
     PLA
 wnibl: STA $c08d,X
-    ora $c08c,X
+    ora SHIFTBASE,X
     RTS
 error: brk
 
 read_track:
     ldx #$60
-    lda $c089,x
-    lda $c08e,x
+    lda MOTORONBASE,x
+    lda READBASE,x
 
 @loop:
     ldy #$FF
 @read:
-    lda $c08c,x
+    lda SHIFTBASE,x
     bpl @read
     cmp #$FF
     bne @loop
     dey
     bne @read
 @1:
-    lda $c0ec
+    lda SHIFTBASE,X
     bpl @1
 @read1:
     cmp #$d5
     NOP
     bne @1
-@read2: lda $c0ec
+@read2: lda SHIFTBASE,X
     bpl @read2
     eor #$aa
     bne @read1
-    jsr $fbe4
-    lda $c088,X
+    jsr $fbe4 ; bell
+    lda MOTOROFFBASE,X
     rts
 
     ; phase 1 is off to begin with
