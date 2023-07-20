@@ -28,7 +28,7 @@ PHASE1STATE = $00 ; .. $01
 ZPDUMMY = $02
 loopctr = $03
 
-LOOP_OUTER = 100
+LOOP_OUTER = 50
 
 ; internal buffers
 STEP_TABLE = $4000
@@ -130,12 +130,14 @@ make_phase1_state_table:
 ; Prepare to begin
 prepare:
     ; enable phase 0
-    LDA PHASE0ON
-
+    LDA PHASE0OFF
     LDA PHASE1OFF
     LDA PHASE2OFF
     LDA PHASE3OFF
 
+    ; LDA PHASE1ON ; XXX
+
+    ; settle
     LDA #$FF
     JSR WAIT
     LDA #$FF
@@ -162,6 +164,86 @@ prepare:
     JSR WAIT
     LDA #$FF
     JSR WAIT
+
+    ;LDA PHASE1OFF ; XXX
+
+    JSR write_track
+
+    JSR read_track
+    BRK
+
+write_track:
+; XXX
+    LDA #$e0
+    STA $FC
+    LDX #$60
+    LDA $c08d,X
+    LDA $c08E,X
+    BMI error
+    LDA #$FF
+    STA $C08F,X
+    CMP $C08C,X
+    LDA $20
+    LDY #$FF
+    TYA
+delay1:
+    PHA
+    PLA
+delay2:
+    JSR wnib7
+    DEY
+    BNE delay1
+    INC $FC
+    BNE delay2
+    NOP
+    NOP
+    NOP
+    LDA #$D5
+    JSR wnibl
+    LDA #$AA
+    JSR wnib9
+    LDA #$FF
+    JSR wnib9
+    LDA $c08E, X
+    LDA $c08C, X
+    LDA $c088, X
+    RTS
+wnib9: CLC
+wnib7: PHA
+    PLA
+wnibl: STA $c08d,X
+    ora $c08c,X
+    RTS
+error: brk
+
+read_track:
+    ldx #$60
+    lda $c089,x
+    lda $c08e,x
+
+@loop:
+    ldy #$FF
+@read:
+    lda $c08c,x
+    bpl @read
+    cmp #$FF
+    bne @loop
+    dey
+    bne @read
+@1:
+    lda $c0ec
+    bpl @1
+@read1:
+    cmp #$d5
+    NOP
+    bne @1
+@read2: lda $c0ec
+    bpl @read2
+    eor #$aa
+    bne @read1
+    jsr $fbe4
+    lda $c088,X
+    rts
 
     ; phase 1 is off to begin with
     LDA #>PHASE1OFF
@@ -172,14 +254,28 @@ prepare:
     LDA #$00
     STA loopctr
 
-    ; JMP prepare_read
+    JMP prepare_read
+
+    LDY #$60
+    
+    STA WRITEBASE,Y 
+    CMP SHIFTBASE,Y
+    STA ZPDUMMY
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    
 
 prepare_write:
+    NOP
     ; start writing 40-cycle FF sync bytes
     LDA #$FF
     LDY #$60
-    LDX #$50  ; number of sync bytes to write
-    STA WRITEBASE,Y 
+    LDX #$FF  ; number of sync bytes to write
+    STA LOADBASE,Y 
     CMP SHIFTBASE,Y
 
 ; 40 - 9 = 31 cycles
@@ -203,53 +299,55 @@ prepare_write:
     STA LOADBASE,Y
     CMP SHIFTBASE,Y
     DEX
-    BNE @0 ; XXX BPL
+    BNE @0
 
     ; write header
-    ; 17 cycles
-    STA ZPDUMMY
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
     NOP
 
     LDA #$D5
-    STA LOADBASE,Y
-    CMP SHIFTBASE,Y
+    JSR write_nibble9 ; 6 + 9 + 
+    ; 9 + 6
+    LDA #$AA ; 2
+    JSR write_nibble9 ; 6 + 9
+    LDA #$96 ; 2
+    JSR write_nibble9 ; 6 + 9
+    LDA #$FF ; 2
+    JSR write_nibble9 ; 6 + 9
+    LDA #$FE ; 2
+    JSR write_nibble9 ; 6 + 9
 
-    ; 21 cycles
-    STA ZPDUMMY
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
+    LDA #$AA ; 2
+    JSR write_nibble9 ; 6 + 9
+    LDA #$AA ; 2
+    JSR write_nibble9 ; 6 + 9
+    LDA #$AE ; 2
+    JSR write_nibble9 ; 6 + 9
+    LDA #$AB ; 2
+    JSR write_nibble9 ; 6 + 9
+    LDA #$FB ; 2
+    JSR write_nibble9 ; 6 + 9
+    LDA #$FF ; 2
+    JSR write_nibble9 ; 6 + 9
+    LDA #$DE ; 2
+    JSR write_nibble9 ; 6 + 9
+    LDA #$AA ; 2
+    JSR write_nibble9 ; 6 + 9
+    LDA #$EB ; 2
+    JSR write_nibble9 ; 6 + 9
 
-    LDA #$AA
-    STA LOADBASE,Y
-    CMP SHIFTBASE,Y
+    LDA READ
+    LDA MOTOROFF
+    BRK
 
+    ; 9 + 6 cycles from RTS
 	; start outer loop, counts from (LOOP_OUTER-1) .. 0
 	LDX #LOOP_OUTER
-
     ; pad to 32 cycles until the next disk STA/CMP in write_nibble
-    NOP
-    NOP
-    NOP
     NOP
 
 disk_write_loop:
 	DEX ; 2
-    LDA READ
-    LDA MOTOROFF
-    BRK;
+
 	BNE write_nibble ; 2/3
 
 	; X=0
@@ -279,6 +377,14 @@ write_nibble:
 	LDA (PHASE1STATE),Y ; 5 Y=0
 	JMP disk_write_loop ; 3
 
+write_nibble9:
+    CLC ; 2
+    PHA ; 3
+    PLA ; 4
+    STA LOADBASE,Y ; 5
+    ORA SHIFTBASE,Y ; 4
+    RTS ; 6
+
 prepare_read:
 	; start outer loop, counts from (LOOP_OUTER-1) .. 0
 	LDX #LOOP_OUTER
@@ -296,20 +402,22 @@ prepare_read:
     BNE @startsync
 
 @tryaa:
-    LDA SHIFTBASE,Y ; XXX
-    BPL @tryaa
-    CMP #$AA
-    STA $401
-    BNE @tryd5
-    BRK
+    LDA SHIFTBASE,Y ; 4
+    BPL @tryaa ; 2/3
+    CMP #$AA ; 2
+    STA $401 ; 4
+    BNE @tryd5 ; 2/3
 
-    ; pad to 32 cycles (32-9 = 23 cycles)
+@read_nibble:
+    LDA SHIFTBASE,Y ; 4
+    BPL @read_nibble
+    STA $500,X ; 5
+    DEX
+    BNE @read_nibble
+    BEQ lost_sync
+
+    ; pad to 32 cycles
     STA ZPDUMMY
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
     NOP
     NOP
     NOP
@@ -333,27 +441,22 @@ disk_read_loop:
 	BNE disk_read_loop ; 3 always
 
 read_nibble:
-    LDA SHIFT
+    LDA SHIFTBASE,Y ; 4
+    STA $400,X ; 5
     CMP #$EE ; 2
     BNE lost_sync ; 2 / 3
 
-    ; pad to 32 cycles (32 - 9 - 3 = 20 cycles)
-
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
+    ; pad to 32 cycles
+    STA ZPDUMMY
     NOP
     NOP
     NOP
     NOP
 
-    JMP disk_read_loop
+    JMP disk_read_loop ; 3
 
 lost_sync:
-    LDA MOTOROFF
+    STA MOTOROFF
     BRK
 
 ;read_nibble:
