@@ -37,6 +37,7 @@ loopctr = $03 ; .. $04
 ; internal buffers
 STEP_TABLE = $4000
 PHASE1STATE_TABLE = $4100
+data = $4200
 
 WAIT = $FCA8
 
@@ -117,6 +118,18 @@ make_phase1_state_table:
 
 @done:
 
+make_data:
+    ; zero out data buffer
+    LDX #$00
+    LDA #$FE ; 0b11111110
+@0:
+    STA data,X
+    INX
+    BNE @0
+
+    LDA #$FF
+    STA data
+
 ; Step to track 0
     LDY #$80 ; current half-track count
     LDX #$00
@@ -178,7 +191,7 @@ prepare:
     LDA #$00
     STA loopctr
 
-    JMP prepare_read
+    ; JMP prepare_read
 
     ; write-protect sense
     LDY #$60
@@ -255,7 +268,6 @@ prepare_write:
     ; pad to 32 cycles until the next disk STA/CMP in disk_write_loop
     STA ZPDUMMY
     NOP
-    NOP
 
     ; inner loop counter
     LDX #LOOP_INNER
@@ -263,10 +275,10 @@ prepare_write:
 disk_write_loop:
     ; need to turn off phase 1 around all writes because the Disk II hardware suppresses writes if it is enabled
     ; We disable it unconditionally here and enable it conditionally later on, which saves some cycles
+    LDY #$60 ; 2 XXX try to keep invariant
     LDA PHASE1OFF ; 4
 
-    LDA #$FF ; 2 byte to write
-    LDY #$60 ; 2 XXX try to keep invariant
+    LDA data,X ; byte to write
 
     ; write the data
     STA LOADBASE,Y ; 5
@@ -280,7 +292,6 @@ disk_write_loop:
     LDA (PHASE1STATE),Y ; 5
 
     STA ZPDUMMY
-    NOP
 
     DEX ; 2
     BNE disk_write_loop ; 2/3
@@ -386,13 +397,21 @@ disk_read_loop:
     ; cycles
     BPL disk_read_loop ; 2/3
 
-buffer:
-    STA $5000,X ; 5
-    LDA buffer+2 ; 4
-    CMP #$80 ; 2
-    BEQ done ; 2
+    ROR ; 2
 
+    BCC @notick ; 2/3
+    STA $C030 ; 4
+    BCS @0 ; 3 always
+
+
+@notick:
+    ; 3+6 = 9
+    NOP
+    NOP
+    NOP
+@0:
     STA ZPDUMMY
+    NOP
     NOP
     NOP
 
@@ -408,7 +427,10 @@ read_step_head:
     LDX STEP_TABLE,Y ; 4
     LDA $C000,X ; 4 toggle next phase switch
 
-    INC buffer+2 ; 6
+    ; INC buffer+2 ; 6
+    NOP
+    NOP
+    NOP
 
     ; LDX PHASE1STATE_TABLE,Y ; 4
     ; STX PHASE1STATE ; 3
