@@ -245,44 +245,35 @@ prepare_write:
     LDA #$AA ; 2
     JSR write_nibble9 ; 6 + 9
 
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-    ;LDA #$BB ; 2
-    ;JSR write_nibble9 ; 6 + 9
-
-    ; 9 + 6 cycles from RTS
 	; start outer loop, counts from (LOOP_OUTER-1) .. 0
 	LDX #LOOP_OUTER
+
     ; pad to 32 cycles until the next disk STA/CMP in write_nibble
+    STA ZPDUMMY
+    NOP
     NOP
 
 disk_write_loop:
+    ; need to turn off phase 1 around all writes because the Disk II hardware
+    ; suppresses writes if it is enabled
+	LDA PHASE1OFF ; 4 ; don't interfere with writes
+
+	LDA #$FF ; 2
+	LDY #$60 ; 2 XXX
+	STA LOADBASE,Y ; 5
+	CMP SHIFTBASE,Y ; 4
+
+    ; reassert the current phase 1 state
+    LDY #$00 ; 2 XXX
+	LDA (PHASE1STATE),Y ; 5 Y=0
+
+    STA ZPDUMMY    
+
 	DEX ; 2
 	BNE write_nibble ; 2/3
+
+    ; falls through when it is time to step the head
+    ; 31 cycles so far, need 33 to get back on 32-cycle write cadence
 
 	; X=0
 	INC loopctr ; 5
@@ -294,23 +285,10 @@ disk_write_loop:
 	STX PHASE1STATE ; 3
 
 	LDX #LOOP_OUTER ; 2 reset inner loop counter1
-        ; XXX could fall through
+
+    STA ZPDUMMY
+    NOP
 	BNE disk_write_loop ; 3 always
-
-; need to turn off phase 1 around all writes because the Disk II hardware suppresses writes if it is enabled
-; 27 cycles + 5 main loop = 32
-write_nibble:
-	LDA PHASE1OFF ; 4 ; don't interfere with writes
-
-	LDA #$FF ; 2
-	LDY #$60 ; 2 XXX
-	STA LOADBASE,Y ; 5
-	CMP SHIFTBASE,Y ; 4
-
-    ; reassert the current phase 1 state
-    LDY #$00 ; 2 XXX
-	LDA (PHASE1STATE),Y ; 5 Y=0
-	JMP disk_write_loop ; 3
 
 write_nibble9:
     CLC ; 2
@@ -388,16 +366,30 @@ prepare_read:
     ; XXX consume remaining BB markers
 
 
+; 31 cycles in the common case
 disk_read_loop:
+    LDA SHIFT ; 4
+    ; should normally fall through, will occasionally loop once when
+    ; we have slipped a cycle and the nibble is not ready after 31
+    ; cycles
+    BPL disk_read_loop ; 2/3
+
+buffer:
+    STA $5000,X ; 5
+    LDA buffer+2 ; 4
+    CMP #$80 ; 2
+    BEQ done ; 2
+
+    STA ZPDUMMY
+    NOP
+    NOP
+
 	DEX ; 2
-	BNE read_nibble ; 2/3
+	BNE disk_read_loop ; 2/3
 
-    ; XXX 31 cycles
+    ; falls through when it's time to step the head
+    ; 30 cycles so far, need 32 to get back on 31-cycle cadence
 
-    ;STA MOTOROFF
-    ;BRK
-
-	; X=0
 	INC loopctr ; 5
 	LDY loopctr ; 3
 	LDX STEP_TABLE,Y ; 4
@@ -408,41 +400,15 @@ disk_read_loop:
     ; LDX PHASE1STATE_TABLE,Y ; 4
 	; STX PHASE1STATE ; 3
 
+    STA ZPDUMMY
+    NOP
+
 	LDX #LOOP_OUTER ; 2 reset inner loop counter1
-    ; XXX could fall through
 	BNE disk_read_loop ; 3 always
-
-read_nibble:
-    LDA SHIFT ; 4
-    BPL read_nibble ; should be infrequent
-
-buffer:
-    STA $5000,X ; 5
-    LDA buffer+2 ; 4
-    CMP #$80 ; 2
-    BEQ done ; 2
-
-    ; STA ZPDUMMY
-    NOP
-    NOP
-
-    BNE disk_read_loop
 
 done:
     STA MOTOROFF
     BRK
-
-; bit slips
-; n' = 0b11101110 = 0xee
-; w  = 0b1110111
-; ;  = 0b111011
-
-
-; n' = 0b11101110
-; Z' = 0b11011010
-; R' = 0b11010010
-; W' = 0b11010111
-
 
 ;read_nibble:
 ;	NOP
