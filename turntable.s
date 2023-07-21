@@ -42,8 +42,8 @@ WAIT = $FCA8
 
 .proc main
     ; spin up disk
-	LDA DISK1SELECT
-	LDA MOTORON
+    LDA DISK1SELECT
+    LDA MOTORON
 
 ; STEP_TABLE: (entries have SLOTn0 added)
 ;    86, 86, 86, 86  ; Phase 3 off   X . . . ; track 0
@@ -57,26 +57,26 @@ WAIT = $FCA8
 ;    [... repeat 8 times to fill 256 bytes ...]
 
 make_step_table:
-	; start with PHASE3OFF
-	LDA #<PHASE3OFF
+    ; start with PHASE3OFF
+    LDA #<PHASE3OFF
 
-	LDX #$00
+    LDX #$00
 @0:
-	STA STEP_TABLE,X
-	INX
-	STA STEP_TABLE,X
-	INX
-	STA STEP_TABLE,X
-	INX
-	STA STEP_TABLE,X
-	INX
-	beq @done
-	SEC ; TODO: could avoid by assuming carry always set and compensating in the ADC
-	SBC #$03
-	CLC
-	AND #$07
-	ADC #(SLOTn0+$80)
-	BNE @0
+    STA STEP_TABLE,X
+    INX
+    STA STEP_TABLE,X
+    INX
+    STA STEP_TABLE,X
+    INX
+    STA STEP_TABLE,X
+    INX
+    beq @done
+    SEC ; TODO: could avoid by assuming carry always set and compensating in the ADC
+    SBC #$03
+    CLC
+    AND #$07
+    ADC #(SLOTn0+$80)
+    BNE @0
 
 @done:
 
@@ -257,51 +257,51 @@ prepare_write:
     NOP
     NOP
 
-	; inner loop counter
-	LDX #LOOP_INNER
+    ; inner loop counter
+    LDX #LOOP_INNER
 
 disk_write_loop:
     ; need to turn off phase 1 around all writes because the Disk II hardware suppresses writes if it is enabled
     ; We disable it unconditionally here and enable it conditionally later on, which saves some cycles
-	LDA PHASE1OFF ; 4
+    LDA PHASE1OFF ; 4
 
-	LDA #$FF ; 2 byte to write
-	LDY #$60 ; 2 XXX try to keep invariant
+    LDA #$FF ; 2 byte to write
+    LDY #$60 ; 2 XXX try to keep invariant
     STA ZPDUMMY
     NOP
 
     ; write the data
     STA LOADBASE,Y ; 5
-	CMP SHIFTBASE,Y ; 4
+    CMP SHIFTBASE,Y ; 4
 
     ; reassert the current phase 1 state
     ;    
     ; If phase 1 is on it will stop shifting out bits from now until we disable it again.
     ; This is a trade-off between moving the head and how many (and which) bits we can successfully write out.
     ; We delay this as much as possible to minimize the data loss.
-	LDA (PHASE1STATE),Y ; 5
-	
+    LDA (PHASE1STATE),Y ; 5
+    
     DEX ; 2
-	BNE disk_write_loop ; 2/3
+    BNE disk_write_loop ; 2/3
 
 write_step_head:
     ; falls through when it is time to step the head
     ; 31 cycles so far, need 33 to get back on 32-cycle write cadence
 
-	INC loopctr ; 5
-	LDY loopctr ; 3
-	LDX STEP_TABLE,Y ; 4
-	LDA $C000,X ; 4 toggle next phase switch
+    INC loopctr ; 5
+    LDY loopctr ; 3
+    LDX STEP_TABLE,Y ; 4
+    LDA $C000,X ; 4 toggle next phase switch
 
     LDX PHASE1STATE_TABLE,Y ; 4
-	STX PHASE1STATE ; 3
+    STX PHASE1STATE ; 3
 
-	; 2 reset inner loop counter1
+    ; 2 reset inner loop counter1
     LDX #LOOP_INNER
 
     STA ZPDUMMY
     NOP
-	BNE disk_write_loop ; 3 always
+    BNE disk_write_loop ; 3 always
 
 write_nibble9:
     CLC ; 2
@@ -372,8 +372,8 @@ prepare_read:
     NOP
     NOP
 
-	; inner loop counter
-	LDX #LOOP_INNER
+    ; inner loop counter
+    LDX #LOOP_INNER
 
 ; 31 cycles in the common case
 ; TODO: also disable/enable phase 1 as in write path so we track more closely
@@ -394,30 +394,30 @@ buffer:
     NOP
     NOP
 
-	DEX ; 2
-	BNE disk_read_loop ; 2/3
+    DEX ; 2
+    BNE disk_read_loop ; 2/3
 
 read_step_head:
     ; falls through when it's time to step the head
     ; 30 cycles so far, need 32 to get back on 31-cycle cadence
 
-	INC loopctr ; 5
-	LDY loopctr ; 3
-	LDX STEP_TABLE,Y ; 4
-	LDA $C000,X ; 4 toggle next phase switch
+    INC loopctr ; 5
+    LDY loopctr ; 3
+    LDX STEP_TABLE,Y ; 4
+    LDA $C000,X ; 4 toggle next phase switch
 
     INC buffer+2 ; 6
 
     ; LDX PHASE1STATE_TABLE,Y ; 4
-	; STX PHASE1STATE ; 3
+    ; STX PHASE1STATE ; 3
 
     STA ZPDUMMY
     NOP
 
-	; 2 reset inner loop counter1
+    ; 2 reset inner loop counter1
     LDX #LOOP_INNER
 
-	BNE disk_read_loop ; 3 always
+    BNE disk_read_loop ; 3 always
 
 done:
     STA MOTOROFF
