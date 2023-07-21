@@ -1,7 +1,10 @@
 ; constants
 SLOTn0 = $60 ; assumes slot 6
 
-; disk soft switches, indexed by SLOTn0
+; how many nibbles to write before stepping head
+LOOP_INNER = 120
+
+; disk soft switches, pre-indexed by SLOTn0
 PHASE0OFF   = $C080+SLOTn0
 PHASE0ON    = $C081+SLOTn0
 PHASE1OFF   = $C082+SLOTn0
@@ -18,7 +21,6 @@ SHIFT       = $C08C+SLOTn0
 READ        = $C08E+SLOTn0
 WRITE       = $c08F+SLOTn0
 
-
 MOTOROFFBASE = $c088
 MOTORONBASE = $c089
 SHIFTBASE = $C08C
@@ -32,8 +34,6 @@ PHASE1STATE = $00 ; .. $01
 ZPDUMMY = $02
 loopctr = $03 ; .. $04
 
-LOOP_OUTER = 120
-
 ; internal buffers
 STEP_TABLE = $4000
 PHASE1STATE_TABLE = $4100
@@ -45,7 +45,7 @@ WAIT = $FCA8
 	LDA DISK1SELECT
 	LDA MOTORON
 
-; STEP_TABLE:
+; STEP_TABLE: (entries have SLOTn0 added)
 ;    86, 86, 86, 86  ; Phase 3 off   X . . . ; track 0
 ;    83, 83, 83, 83  ; Phase 1 on    X X . . ; track 0.25
 ;    80, 80, 80, 80  ; Phase 0 off   . X . . ; track 0.5
@@ -59,8 +59,6 @@ WAIT = $FCA8
 make_step_table:
 	; start with PHASE3OFF
 	LDA #<PHASE3OFF
-    ;CLC
-    ;ADC #SLOTn0
 
 	LDX #$00
 @0:
@@ -83,6 +81,7 @@ make_step_table:
 @done:
 
 ; PHASE1STATE_TABLE ;
+; here we don't pre-index by SLOTn0 because we need to do indirect addressing anyway at the point of use
 ;    83, 83, 83, 83 ; [0  ..  3] phase 1 off
 ;    82, 82, 82, 82 ; [4  ..   ] phase 1 on
 ;    83, 83, 83, 83 ; [   ..   ] phase 1 on
@@ -92,20 +91,22 @@ make_step_table:
 ;    82, 82, 82, 82 ; [   ..   ] phase 1 off
 ;    82, 82, 82, 82 ; [   .. 31] phase 1 off
 
+; TODO: could avoid pre-indexing by SLOTn0 and
+; self-modify the base address to be $C0n0
 make_phase1_state_table:
     LDX #$00
-    LDY #<PHASE1OFF
+    LDY #<(PHASE1OFF-SLOTn0)
 @0:
     TXA
     AND #31
     CMP #$4
     BNE @1
-    LDY #<PHASE1ON
+    LDY #<(PHASE1ON-SLOTn0)
     BNE @next
 @1:
     CMP #$10
     BNE @next
-    LDY #<PHASE1OFF
+    LDY #<(PHASE1OFF-SLOTn0)
 
 @next:
     TYA
@@ -140,6 +141,7 @@ prepare:
     LDA PHASE3OFF
 
     ; settle
+    ; TODO: excessive
     LDA #$FF
     JSR WAIT
     LDA #$FF
@@ -168,26 +170,31 @@ prepare:
     JSR WAIT
 
     ; phase 1 is off to begin with
-    LDA #>PHASE1OFF
+    LDA #>(PHASE1OFF-SLOTn0)
     STA PHASE1STATE+1
-    LDA #<PHASE1OFF
+    LDA #<(PHASE1OFF-SLOTn0)
     STA PHASE1STATE
 
     LDA #$00
     STA loopctr
 
-    JMP prepare_read
+    ; JMP prepare_read
 
+    ; write sense
     LDY #$60
-    
     LDA LOADBASE,Y
     LDA READBASE,Y
     BPL @noerror
     BRK
 
 @noerror:
+prepare_write:
+    ; start writing 40-cycle FF sync bytes
+    LDA #$FF
     STA WRITEBASE,Y 
     CMP SHIFTBASE,Y
+
+    ; XXX use fewer bytes
     STA ZPDUMMY
     NOP
     NOP
@@ -195,19 +202,21 @@ prepare:
     NOP
     NOP
     NOP
-    
-
-prepare_write:
     NOP
-    ; start writing 40-cycle FF sync bytes
-    LDA #$FF
-    LDY #$60
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
 
-    LDX #$FF  ; number of sync bytes to write
+    ; XXX write fewer
+    LDX #$FF ; number of sync bytes to write
     STA LOADBASE,Y 
     CMP SHIFTBASE,Y
 
-; 40 - 9 = 31 cycles
+    ; 40 - 9 = 31 cycles
+    ; XXX use fewer bytes
     STA ZPDUMMY
     NOP
 @0:
@@ -230,52 +239,55 @@ prepare_write:
     DEX
     BNE @0
 
+    ; make sure last sync byte is a FF40 too
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+
     ; write header
-    NOP
-
-    ; make sure this is a FF40 too
-    NOP
-    NOP
-    NOP
-    NOP
-
     LDA #$D5
-    JSR write_nibble9 ; 6 + 9 + 
-    ; 9 + 6
+    JSR write_nibble9 ; 6 + 9 + (STA/CMP) + 6
     LDA #$AA ; 2
-    JSR write_nibble9 ; 6 + 9
+    JSR write_nibble9 ; 6 + 9 + (STA/CMP) + 6
 
-	; start outer loop, counts from (LOOP_OUTER-1) .. 0
-	LDX #LOOP_OUTER
-
-    ; pad to 32 cycles until the next disk STA/CMP in write_nibble
+    ; pad to 32 cycles until the next disk STA/CMP in disk_write_loop
     STA ZPDUMMY
     NOP
     NOP
 
-disk_write_loop:
-    ; need to turn off phase 1 around all writes because the Disk II hardware
-    ; suppresses writes if it is enabled
-	LDA PHASE1OFF ; 4 ; don't interfere with writes
+	; inner loop counter
+	LDX #LOOP_INNER
 
-	LDA #$FF ; 2
-	LDY #$60 ; 2 XXX
-	STA LOADBASE,Y ; 5
+disk_write_loop:
+    ; need to turn off phase 1 around all writes because the Disk II hardware suppresses writes if it is enabled
+    ; We disable it unconditionally here and enable it conditionally later on, which saves some cycles
+	LDA PHASE1OFF ; 4
+
+	LDA #$FF ; 2 byte to write
+	LDY #$60 ; 2 XXX try to keep invariant
+    STA ZPDUMMY
+    NOP
+
+    ; write the data
+    STA LOADBASE,Y ; 5
 	CMP SHIFTBASE,Y ; 4
 
     ; reassert the current phase 1 state
-    LDY #$00 ; 2 XXX
-	LDA (PHASE1STATE),Y ; 5 Y=0
+    ;    
+    ; If phase 1 is on it will stop shifting out bits from now until we disable it again.
+    ; This is a trade-off between moving the head and how many (and which) bits we can successfully write out.
+    ; We delay this as much as possible to minimize the data loss.
+	LDA (PHASE1STATE),Y ; 5
+	
+    DEX ; 2
+	BNE disk_write_loop ; 2/3
 
-    STA ZPDUMMY    
-
-	DEX ; 2
-	BNE write_nibble ; 2/3
-
+write_step_head:
     ; falls through when it is time to step the head
     ; 31 cycles so far, need 33 to get back on 32-cycle write cadence
 
-	; X=0
 	INC loopctr ; 5
 	LDY loopctr ; 3
 	LDX STEP_TABLE,Y ; 4
@@ -284,7 +296,8 @@ disk_write_loop:
     LDX PHASE1STATE_TABLE,Y ; 4
 	STX PHASE1STATE ; 3
 
-	LDX #LOOP_OUTER ; 2 reset inner loop counter1
+	; 2 reset inner loop counter1
+    LDX #LOOP_INNER
 
     STA ZPDUMMY
     NOP
@@ -299,12 +312,10 @@ write_nibble9:
     RTS ; 6
 
 prepare_read:
-	; start outer loop, counts from (LOOP_OUTER-1) .. 0
-	LDX #LOOP_OUTER
     LDA READ
 
     LDY #$60 ; XXX
-
+    ; read 5 sync bytes
 @loop:
     ldx #$5
 @read:
@@ -316,8 +327,6 @@ prepare_read:
     bne @loop
     dex
     bne @read
-
-	LDX #LOOP_OUTER ; XXX
 
     ; sync to track start
 @startsync:
@@ -338,9 +347,8 @@ prepare_read:
 
     ; Now do 33 cycle reads until we get a 0 indicating that we have
     ; waited too long and the read register has been cleared
-
     NOP    
-@0: ; 17 more cycles
+@0:
     STA ZPDUMMY
     INC $700 ; 6
     NOP
@@ -355,18 +363,20 @@ prepare_read:
     NOP
     BNE @0 ; 3
 
-    ; we have just missed the window by 1 cycle, so do a 29 cycle read
-    ; this time to get back in sync
-    ; 9 cycles so far
-
-    STA ZPDUMMY
+    ; now we have just missed the trailing edge of the (~8 cycle) valid read window by 1 cycle,
+    ; so do a 27-cycle read this time to jump into the middle of the window and hopefully stay
+    ; mostly centered there.  Drive speed is not constant though so there is still some drift.
+    NOP
+    NOP
+    NOP
+    NOP
     NOP
 
-    ; plus 5 following
-    ; XXX consume remaining BB markers
-
+	; inner loop counter
+	LDX #LOOP_INNER
 
 ; 31 cycles in the common case
+; TODO: also disable/enable phase 1 as in write path so we track more closely
 disk_read_loop:
     LDA SHIFT ; 4
     ; should normally fall through, will occasionally loop once when
@@ -387,6 +397,7 @@ buffer:
 	DEX ; 2
 	BNE disk_read_loop ; 2/3
 
+read_step_head:
     ; falls through when it's time to step the head
     ; 30 cycles so far, need 32 to get back on 31-cycle cadence
 
@@ -403,31 +414,13 @@ buffer:
     STA ZPDUMMY
     NOP
 
-	LDX #LOOP_OUTER ; 2 reset inner loop counter1
+	; 2 reset inner loop counter1
+    LDX #LOOP_INNER
+
 	BNE disk_read_loop ; 3 always
 
 done:
     STA MOTOROFF
     BRK
-
-;read_nibble:
-;	NOP
-;	NOP
-;	NOP
-;	NOP
-;	LDY Q6L ; 4 read
-;	BIT decodetable,Y ; 4 [SMC] - increment table to step through tracks
-;	BEQ end_of_track ; 2
-;	BPL notick ; 2/3
-;	STA $c030 ; 4
-;	JMP diskloop ; 3
-;	
-;notick:
-;	;2+3+4+4+3+3+3
-;	STA dummy ; 3
-;   JMP diskloop ; 3
-
-; phase path:
-; 2+2+5+3+4+4+2+2+2+3+3 = 32
 
 .endproc
