@@ -245,6 +245,35 @@ prepare_write:
     LDA #$AA ; 2
     JSR write_nibble9 ; 6 + 9
 
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+    ;LDA #$BB ; 2
+    ;JSR write_nibble9 ; 6 + 9
+
     ; 9 + 6 cycles from RTS
 	; start outer loop, counts from (LOOP_OUTER-1) .. 0
 	LDX #LOOP_OUTER
@@ -273,8 +302,8 @@ disk_write_loop:
 write_nibble:
 	LDA PHASE1OFF ; 4 ; don't interfere with writes
 
-	LDA #$EE ; 2
-	LDY #$60 ; 2 XXX try Y=0
+	LDA #$FF ; 2
+	LDY #$60 ; 2 XXX
 	STA LOADBASE,Y ; 5
 	CMP SHIFTBASE,Y ; 4
 
@@ -327,21 +356,50 @@ prepare_read:
     CMP #$AA ; 2
     STA $401 ; 4
     BNE @tryd5 ; 2/3
+    ; 14 cycles
+
+    ; Now do 33 cycle reads until we get a 0 indicating that we have
+    ; waited too long and the read register has been cleared
+
+    NOP    
+@0: ; 17 more cycles
+    STA ZPDUMMY
+    INC $700 ; 6
+    NOP
+    NOP    
+    NOP
+    NOP
+    
+    LDA SHIFTBASE,y ; 4
+    STA $701 ; 4
+    ; 5
+    STA ZPDUMMY
+    NOP
+    BNE @0 ; 3
+
+    ; we have just missed the window by 1 cycle, so do a 29 cycle read
+    ; this time to get back in sync
+    ; 9 cycles so far
 
     STA ZPDUMMY
     NOP
-    NOP
-    NOP
-    NOP
-    NOP
+
+    ; plus 5 following
+    ; XXX consume remaining BB markers
+
 
 disk_read_loop:
 	DEX ; 2
 	BNE read_nibble ; 2/3
 
+    ; XXX 31 cycles
+
+    ;STA MOTOROFF
+    ;BRK
+
 	; X=0
 	INC loopctr ; 5
-	LDY a:loopctr ; 4 ; !! 1 cycle delayed compared to write
+	LDY loopctr ; 3
 	LDX STEP_TABLE,Y ; 4
 	LDA $C000,X ; 4 toggle next phase switch
 
@@ -356,6 +414,7 @@ disk_read_loop:
 
 read_nibble:
     LDA SHIFT ; 4
+    BPL read_nibble ; should be infrequent
 
 buffer:
     STA $5000,X ; 5
@@ -363,7 +422,7 @@ buffer:
     CMP #$80 ; 2
     BEQ done ; 2
 
-    STA ZPDUMMY
+    ; STA ZPDUMMY
     NOP
     NOP
 
