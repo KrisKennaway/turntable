@@ -82,8 +82,8 @@ make_step_table:
 
 ; PHASE1STATE_TABLE ;
 ; here we don't pre-index by SLOTn0 because we need to do indirect addressing anyway at the point of use
-;    83, 83, 83, 83 ; [0  ..  3] phase 1 off
-;    82, 82, 82, 82 ; [4  ..   ] phase 1 on
+;    82, 82, 82, 82 ; [0  ..  3] phase 1 off
+;    83, 83, 83, 83 ; [4  ..   ] phase 1 on
 ;    83, 83, 83, 83 ; [   ..   ] phase 1 on
 ;    83, 83, 83, 83 ; [   .. 15] phase 1 on
 ;    82, 82, 82, 82 ; [16 ..   ] phase 1 off
@@ -178,9 +178,9 @@ prepare:
     LDA #$00
     STA loopctr
 
-    ; JMP prepare_read
+    JMP prepare_read
 
-    ; write sense
+    ; write-protect sense
     LDY #$60
     LDA LOADBASE,Y
     LDA READBASE,Y
@@ -267,20 +267,21 @@ disk_write_loop:
 
     LDA #$FF ; 2 byte to write
     LDY #$60 ; 2 XXX try to keep invariant
-    STA ZPDUMMY
-    NOP
 
     ; write the data
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
     ; reassert the current phase 1 state
-    ;    
+    ;
     ; If phase 1 is on it will stop shifting out bits from now until we disable it again.
     ; This is a trade-off between moving the head and how many (and which) bits we can successfully write out.
     ; We delay this as much as possible to minimize the data loss.
     LDA (PHASE1STATE),Y ; 5
-    
+
+    STA ZPDUMMY
+    NOP
+
     DEX ; 2
     BNE disk_write_loop ; 2/3
 
@@ -301,6 +302,7 @@ write_step_head:
 
     STA ZPDUMMY
     NOP
+    ;JMP done
     BNE disk_write_loop ; 3 always
 
 write_nibble9:
