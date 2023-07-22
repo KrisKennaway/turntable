@@ -128,7 +128,9 @@ make_data:
     BNE @0
 
     LDA #$FF
-    STA data
+    STA data+1
+    STA data+41
+    STA data+80
 
 ; Step to track 0
     LDY #$80 ; current half-track count
@@ -174,13 +176,6 @@ prepare:
     LDA #$FF
     JSR WAIT
     LDA #$FF
-    JSR WAIT
-    LDA #$FF
-    JSR WAIT
-    LDA #$FF
-    JSR WAIT
-    LDA #$FF
-    JSR WAIT
 
     ; phase 1 is off to begin with
     LDA #>(PHASE1OFF-SLOTn0)
@@ -191,7 +186,7 @@ prepare:
     LDA #$00
     STA loopctr
 
-    ; JMP prepare_read
+    ;JMP prepare_read
 
     ; write-protect sense
     LDY #$60
@@ -301,19 +296,32 @@ write_step_head:
     ; 31 cycles so far, need 33 to get back on 32-cycle write cadence
 
     INC loopctr ; 5
-    LDY loopctr ; 3
+    LDY #$60
+    NOP
+
+    LDA #$FF ; 2
+    STA LOADBASE,Y ; 5
+    CMP SHIFTBASE,Y ; 4
+
+    LDY a:loopctr ; 4
     LDX STEP_TABLE,Y ; 4
     LDA $C000,X ; 4 toggle next phase switch
 
     LDX PHASE1STATE_TABLE,Y ; 4
     STX PHASE1STATE ; 3
 
-    ; 2 reset inner loop counter1
-    LDX #LOOP_INNER
+    LDY #$60
+    LDA #$FF ; 2
+    STA LOADBASE,Y ; 5
+    CMP SHIFTBASE,Y ; 4
 
     STA ZPDUMMY
     NOP
-    ;JMP done
+    NOP
+    NOP
+
+    ; 2 reset inner loop counter1
+    LDX #LOOP_INNER-1 ; we wrote an extra nibble
     BNE disk_write_loop ; 3 always
 
 write_nibble9:
