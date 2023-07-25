@@ -109,11 +109,11 @@ make_phase1_state_table:
     EOR STEP_TABLE2,X
     BNE @1
     ; Phase 1 is on
-    LDA #<(PHASE1ON-SLOTn0)
+    LDA #$FF
     BNE @2
 @1:
     ; Phase 1 is off
-    LDA #<(PHASE1OFF-SLOTn0)
+    LDA #$0
 @2:
     STA PHASE1STATE_TABLE,X
 
@@ -123,7 +123,7 @@ make_phase1_state_table:
 make_data:
     ; zero out data buffer
     LDX #$00
-    LDA #$9F ; 0b10011111
+    LDA #$FE ; XXX 9F ; 0b10011111
 @0:
     STA data,X
     INX
@@ -167,7 +167,7 @@ prepare:
     LDA #$00
     STA loopctr
 
-    ;JMP prepare_read
+    JMP prepare_read
 
 prepare_write:
     ; allow time to settle
@@ -274,12 +274,12 @@ prepare_write:
     STA ZPDUMMY ; 3
 
 disk_write_loop:
+    NOP
+    NOP
+
     ; need to turn off phase 1 around all writes because the Disk II hardware suppresses writes if it is enabled
     ; We disable it unconditionally here and enable it conditionally later on, which saves some cycles
     LDY #$60 ; 2 XXX try to keep invariant
-    ; LDA PHASE1OFF ; 4
-    NOP
-    NOP
     
     LDA data,X ; 4 byte to write
 
@@ -287,12 +287,6 @@ disk_write_loop:
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
-    ; reassert the current phase 1 state
-    ;
-    ; If phase 1 is on it will stop shifting out bits from now until we disable it again.
-    ; This is a trade-off between moving the head and how many (and which) bits we can successfully write out.
-    ; We delay this as much as possible to minimize the data loss.
-    ; LDA (PHASE1STATE),Y ; 5
     STA ZPDUMMY
     NOP
         
@@ -321,12 +315,78 @@ write_step_head:
     STA LOADBASE,X ; 5
     CMP SHIFTBASE,X ; 4
 
-    LDX PHASE1STATE_TABLE,Y ; 4
-    STX a:PHASE1STATE ; 4
+    LDA PHASE1STATE_TABLE,Y ; 4 ; XXX
+    BNE write_prepare_phase1
+    NOP
     
     ; 2 reset inner loop counter1
     LDX #LOOP_INNER-1 ; we wrote an extra nibble
     BNE disk_write_loop ; 3 always
+
+write_prepare_phase1:
+    LDX #LOOP_INNER - 11 ; we're going to write 10 FF40 sync bytes
+    NOP
+    NOP
+
+disk_write_loop_phase1:
+    STA ZPDUMMY ; 3
+    NOP
+    STA ZPDUMMY
+    
+    ; write the data
+    LDY #$60 ; 2 XXX try to keep invariant
+    ; XXX no actual need
+    STA LOADBASE,Y ; 5
+    CMP SHIFTBASE,Y ; 4
+
+    STA ZPDUMMY
+    NOP
+        
+    STA ZPDUMMY ; 3
+    DEX ; 2
+    BNE disk_write_loop_phase1 ; 2/3
+
+    LDX #$7
+
+; write 7 FF40 bytes so the next write phase is synced
+write_ff40:
+    STA ZPDUMMY ; 3
+    STA PHASE1OFF ; could do it outside the loop too
+    LDA #$FF
+    STA LOADBASE,Y ; 5
+    CMP SHIFTBASE,Y ; 4
+
+    STA ZPDUMMY
+    STA ZPDUMMY
+    STA ZPDUMMY
+    NOP
+    NOP
+    NOP
+    NOP
+
+
+    DEX
+    BNE write_ff40
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+
+    ; one more FF40
+    ; XXX roll this up
+    STA LOADBASE,Y ; 5
+    CMP SHIFTBASE,Y ; 4
+
+    STA ZPDUMMY
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    NOP
+    JMP write_step_head
 
 write_nibble9:
     CLC ; 2
@@ -417,7 +477,8 @@ disk_read_loop_nopush:
     ; keep same timing padding in all 3 variants
     NOP
     NOP
-    STA ZPDUMMY
+    NOP
+    NOP
 
 disk_read_loop_nopush_tail:
     BVC @notick ; 2/3
@@ -430,8 +491,7 @@ disk_read_loop_nopush_tail:
     NOP
     NOP
 @next:
-    NOP
-    NOP
+    PHP
 
     DEX ; 2
     BNE disk_read_loop_nopush ; 2/3
@@ -467,8 +527,9 @@ disk_read_loop_push:
     BPL disk_read_loop_push ; 2/3
 
     ; keep same timing padding in all 3 variants
-    PHA
+    PHP
     STA ZPDUMMY
+    NOP
 
     BVC @notick ; 2/3
     STA $C030 ; 4
@@ -480,8 +541,7 @@ disk_read_loop_push:
     NOP
     NOP
 @next:
-    NOP
-    NOP
+    STA ZPDUMMY
 
     DEX ; 2
     BNE disk_read_loop_push ; 2/3
@@ -489,7 +549,6 @@ disk_read_loop_push:
 read_step_head_push:
     ; falls through when it's time to step the head
     ; 30 cycles so far, need 32 to get back on 31-cycle cadence
-
     STA ZPDUMMY
 
     INC loopctr ; 5
@@ -508,16 +567,15 @@ read_step_head_push:
     ; write anything sensible
 
 disk_read_loop_pull:
-    BIT SHIFT ; 4
-    ; should normally fall through, will occasionally loop once when
-    ; we have slipped a cycle and the nibble is not ready after 31
-    ; cycles
-    BPL disk_read_loop_pull ; 2/3
+    NOP
+    NOP
+    NOP
 
     ; keep same timing padding in all 3 variants
-    PLA
-    ROL
-    ROL
+    PLP
+    ; XXX instead use C bit for push, PHA/PLP and use V bit here
+    ROR ; bit 0 --> C ; XXX won't work
+    NOP
     
     BCC @notick ; 2/3
     STA $C030 ; 4
@@ -529,8 +587,7 @@ disk_read_loop_pull:
     NOP
     NOP
 @next:
-    NOP
-    NOP
+    STA ZPDUMMY
 
     DEX ; 2
     BNE disk_read_loop_pull ; 2/3
@@ -540,7 +597,7 @@ read_step_head_pull:
     ; 30 cycles so far, need 32 to get back on 31-cycle cadence
 
     INC loopctr ; 5
-    LDX loopctr ; 3
+    LDX a:loopctr ; 4
     LDY STEP_TABLE1,X ; 4
     LDA $C000,Y ; 4 toggle next phase switch
 
@@ -552,7 +609,7 @@ read_step_head_pull:
 
     ; are we about to transition away from a push/pull phase 1 cycle?
     CPY #$84+SLOTn0
-    BNE disk_read_loop_push ; 32
+    BNE disk_read_loop_push ; 3
     ; falls through
 
 ; same header as disk_read_loop_nopush so we can fall through and then jump back at a convenient point
@@ -565,7 +622,7 @@ disk_read_loop_nopush2:
 
     ; keep same timing padding in all 3 variants
     NOP
-    NOP
+    STA ZPDUMMY
     JMP disk_read_loop_nopush_tail
 
 done:
