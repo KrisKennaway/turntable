@@ -51,19 +51,13 @@ WAIT = $FCA8
 
 ; STEP_TABLE: (entries have SLOTn0 added)
 
-; XXX doesn't give stable control when alternating batches with phase 1 on/off
-; but what if I alternate every other byte?
-; probably too hard to avoid slipping a nibble and desyncing
-;
-; what about another spiral pattern?  do almost a whole track 
-
 STEP_TABLE1_DATA:
 ; XXX use PHASE1OFF_BASE etc
 ; XXX constants for sentinels
 .byte    $86, $86, $86, $86  ; X . . . ; track 0
 .byte    $81, $80, $81, $80  ; X X . . ; track 0.25
 .byte    $80, $80, $80, $80  ; . X . . ; track 0.5
-.byte    $85, $85, $85, $82  ; . X X . ; track 0.75 XXX 82/84 swapped so we can use 84 as a sentinel
+.byte    $85, $84, $85, $82  ; . X X . ; track 0.75 XXX 82/84 swapped so we can use 84 as a sentinel
 .byte    $82, $82, $82, $82  ; . . X . ; track 1
 .byte    $87, $87, $87, $87  ; . . X X ; track 1.25
 .byte    $84, $84, $84, $84  ; . . . X ; track 1.5
@@ -283,7 +277,9 @@ disk_write_loop:
     ; need to turn off phase 1 around all writes because the Disk II hardware suppresses writes if it is enabled
     ; We disable it unconditionally here and enable it conditionally later on, which saves some cycles
     LDY #$60 ; 2 XXX try to keep invariant
-    LDA PHASE1OFF ; 4
+    ; LDA PHASE1OFF ; 4
+    NOP
+    NOP
     
     LDA data,X ; 4 byte to write
 
@@ -296,7 +292,9 @@ disk_write_loop:
     ; If phase 1 is on it will stop shifting out bits from now until we disable it again.
     ; This is a trade-off between moving the head and how many (and which) bits we can successfully write out.
     ; We delay this as much as possible to minimize the data loss.
-    LDA (PHASE1STATE),Y ; 5
+    ; LDA (PHASE1STATE),Y ; 5
+    STA ZPDUMMY
+    NOP
         
     STA ZPDUMMY ; 3
     DEX ; 2
