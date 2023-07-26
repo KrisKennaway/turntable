@@ -120,19 +120,23 @@ make_phase1_state_table:
     INX
     BNE @0
 
+; bit 0 signals speaker status, with bit 6 additional used during phase 1 (reverse order during batch)
 make_data:
     ; zero out data buffer
     LDX #$00
-    LDA #$FE ; XXX 9F ; 0b10011111
+    LDA #$BE ; 0b10111110
 @0:
     STA data,X
     INX
     BNE @0
 
     LDA #$FF
-    STA data+1
-    STA data+41
+    STA data
+    STA data+20
+    STA data+40
+    STA data+60
     STA data+80
+    STA data+100
 
 seek_track0:
 ; Step to track 0
@@ -468,22 +472,22 @@ prepare_read:
 ; 3. pull from stack, during phase 1
 
 disk_read_loop_nopush:
-    BIT SHIFT ; 4
+    LDA SHIFT ; 4
     ; should normally fall through, will occasionally loop once when
     ; we have slipped a cycle and the nibble is not ready after 31
     ; cycles
     BPL disk_read_loop_nopush ; 2/3
 
     ; keep same timing padding in all 3 variants
-    NOP
+    ROR
     NOP
     NOP
     NOP
 
 disk_read_loop_nopush_tail:
-    BVC @notick ; 2/3
+    BCC @notick ; 2/3
     STA $C030 ; 4
-    BVS @next ; 3 always
+    BCS @next ; 3 always
 
 @notick:
     ; 3+6 = 9
@@ -520,20 +524,20 @@ read_step_head_nopush:
     ; 31 cycles when falling through
 
 disk_read_loop_push:
-    BIT SHIFT ; 4
+    LDA SHIFT ; 4
     ; should normally fall through, will occasionally loop once when
     ; we have slipped a cycle and the nibble is not ready after 31
     ; cycles
     BPL disk_read_loop_push ; 2/3
 
     ; keep same timing padding in all 3 variants
-    PHP
+    PHA
     STA ZPDUMMY
-    NOP
+    ROR
 
-    BVC @notick ; 2/3
+    BCC @notick ; 2/3
     STA $C030 ; 4
-    BVS @next ; 3 always
+    BCS @next ; 3 always
 
 @notick:
     ; 3+6 = 9
@@ -573,13 +577,12 @@ disk_read_loop_pull:
 
     ; keep same timing padding in all 3 variants
     PLP
-    ; XXX instead use C bit for push, PHA/PLP and use V bit here
-    ROR ; bit 0 --> C ; XXX won't work
+    NOP 
     NOP
     
-    BCC @notick ; 2/3
+    BVC @notick ; 2/3
     STA $C030 ; 4
-    BCS @next ; 3 always
+    BVS @next ; 3 always
 
 @notick:
     ; 3+6 = 9
