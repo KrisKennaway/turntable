@@ -2,7 +2,7 @@
 SLOTn0 = $60 ; assumes slot 6
 
 ; how many nibbles to write before stepping head
-LOOP_INNER = 120
+LOOP_INNER = 240
 
 ; disk soft switches, pre-indexed by SLOTn0
 PHASE0OFF   = $C080+SLOTn0
@@ -41,6 +41,13 @@ PHASE1STATE_TABLE = $4200
 data = $4300
 
 WAIT = $FCA8
+BELL = $FF3A
+
+SLINKY_SLOTn0 = $40
+SLINKY_ADDRL = $C080+SLINKY_SLOTn0
+SLINKY_ADDRM = $C081+SLINKY_SLOTn0
+SLINKY_ADDRH = $C082+SLINKY_SLOTn0
+SLINKY_DATA = $C083+SLINKY_SLOTn0
 
 .proc main
     ; spin up disk
@@ -121,22 +128,22 @@ make_phase1_state_table:
     BNE @0
 
 ; bit 0 signals speaker status, with bit 6 additional used during phase 1 (reverse order during batch)
-make_data:
-    ; zero out data buffer
-    LDX #$00
-    LDA #$BE ; 0b10111110
-@0:
-    STA data,X
-    INX
-    BNE @0
-
-    LDA #$FF
-    STA data
-    STA data+20
-    STA data+40
-    STA data+60
-    STA data+80
-    STA data+100
+;make_data:
+;    ; zero out data buffer
+;    LDX #$00
+;    LDA #$BE ; 0b10111110
+;@0:
+;    STA data,X
+;    INX
+;    BNE @0
+;
+;    LDA #$FF
+;    STA data
+;    STA data+20
+;    STA data+40
+;    STA data+60
+;    STA data+80
+;    STA data+100
 
 seek_track0:
 ; Step to track 0
@@ -171,7 +178,25 @@ prepare:
     LDA #$00
     STA loopctr
 
+    STA SLINKY_ADDRL
+    STA SLINKY_ADDRM
+    STA SLINKY_ADDRH
+
+@0:
+    LDA $C000
+    BPL @0
+    BIT $C010
+    CMP #$d2 ; 'R'
+    BNE @1
     JMP prepare_read
+@1:
+    CMP #$D7 ; 'W'
+    BEQ @2
+    JSR BELL
+    JMP @0
+@2:
+    JSR load_slinky
+    JMP prepare_write
 
 prepare_write:
     ; allow time to settle
@@ -285,7 +310,7 @@ disk_write_loop:
     ; We disable it unconditionally here and enable it conditionally later on, which saves some cycles
     LDY #$60 ; 2 XXX try to keep invariant
     
-    LDA data,X ; 4 byte to write
+    LDA SLINKY_DATA ; 4 byte to write
 
     ; write the data
     STA LOADBASE,Y ; 5
@@ -631,5 +656,105 @@ disk_read_loop_nopush2:
 done:
     STA MOTOROFF
     BRK
+
+MLI = $BF00
+MLI_OPEN = $C8
+MLI_READ = $CA
+IO_BUF = $4400
+DATA_BUF = $4800
+
+load_slinky:
+    LDX #$00
+    STX SLINKY_ADDRL
+    STX SLINKY_ADDRM
+    STX SLINKY_ADDRH
+
+    JSR MLI
+    .byte MLI_OPEN
+    .addr open_cmdlist
+    BNE @error
+
+    LDA open_refnum
+    STA read_refnum
+
+@read_block:
+    INC $400
+    JSR MLI
+    .byte MLI_READ
+    .addr read_cmdlist
+    CLC
+    BEQ @store_data
+
+    CMP #$4C  ; EOF
+    BNE @error
+    SEC ; signal EOF
+
+    ; XXX not careful about EOF
+@store_data:
+    LDX #$00
+@0:
+    LDA DATA_BUF,X
+    STA SLINKY_DATA
+    INX
+    BNE @0
+
+    BCC @read_block
+
+    JMP @play
+@error:
+    BRK
+
+@play:
+    LDA #$00
+    STA SLINKY_ADDRL
+    STA SLINKY_ADDRM
+    STA SLINKY_ADDRH
+
+playback:
+    LDA SLINKY_DATA
+    ROR
+
+    BCC @notick ; 2/3
+    STA $C030 ; 4
+    BCS @next ; 3 always
+
+@notick:
+    ; 3+6 = 9
+    NOP
+    NOP
+    NOP
+
+@next:
+    STA $401
+    BIT $C000
+    BMI @done
+    NOP
+    NOP
+    JMP playback
+
+@done:
+    BIT $C010
+
+    RTS
+
+
+open_cmdlist:
+    .byte $03 ; param_count
+    .addr pathname
+    .addr IO_BUF
+open_refnum:
+    .byte 00 ; ref_num
+
+pathname:
+    .byte 10
+    .asciiz "SOUND.DATA" ; XXX unneeded trailing 0
+
+read_cmdlist:
+    .byte $04 ; param_count
+read_refnum:
+    .byte 00 ; ref_num
+    .addr DATA_BUF
+    .word $0100 ; request_count
+    .word $0000 ; transfer_count
 
 .endproc
