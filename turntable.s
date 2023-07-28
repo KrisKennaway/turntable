@@ -283,14 +283,11 @@ prepare_write:
     JSR write_nibble9 ; 6 + 9 + (STA/CMP) + 6
 
     ; pad to 32 cycles until the next disk STA/CMP in disk_write_loop
-    ; STA ZPDUMMY
+    STA ZPDUMMY
     NOP
 
     ; inner loop counter
     LDX #LOOP_INNER
-
-    STA ZPDUMMY ; 3
-
 disk_write_loop:
     NOP
     NOP
@@ -464,43 +461,12 @@ prepare_read:
     BNE @tryd5 ; 2/3
     ; 14 cycles
 
-;    ; Now do 33 cycle reads until we get a 0 indicating that we have
-;    ; waited too long and the read register has been cleared
-;    NOP    
-;@0:
-;    STA ZPDUMMY
-;    INC $700 ; 6
-;    NOP
-;    NOP    
-;    NOP
-;    NOP
-;    
-;    LDA SHIFTBASE,y ; 4
-;    STA $701 ; 4
-;    ; 5
-;    STA ZPDUMMY
-;    NOP
-;    BNE @0 ; 3
-;
-;    ; now we have just missed the trailing edge of the (~8 cycle) valid read window by 1 cycle,
-;    ; so do a 27-cycle read this time to jump into the middle of the window and hopefully stay
-;    ; mostly centered there.  Drive speed is not constant though so there is still some drift.
-;    NOP
-;    NOP
-;    NOP
-;    NOP
-;    NOP
-
-    ; inner loop counter
-    ; LDX #LOOP_INNER+1
-
-; 31 cycles in the common case
-
 ; need 3 variants
 ; 1. straight playback
 ; 2. push onto stack, previous to phase 1 on
 ; 3. pull from stack, during phase 1
 
+; 29 cycles in common case
 disk_read_loop_nopush:
     LDA SHIFT ; 4
     ; should normally fall through, will occasionally loop once when
@@ -511,26 +477,22 @@ disk_read_loop_nopush:
     ROR
     BCC @notick ; 2/3
     STA $C030 ; 4
+    BCS @next
 
 @notick:
+    NOP
+    NOP
+    NOP
+
+@next:
     ROL
+    NOP
+
+    STA ZPDUMMY
+    NOP
+    
     CMP #$FF
     BNE disk_read_loop_nopush ; 2/3
-
-; resync with sector lead
-@startsync:
-    ;LDA SHIFT ; XXX
-    ;BPL @startsync
-;@tryd5:
-;    ;STA $400
-;    EOR #$D5
-;    BNE @startsync
-@tryaa:
-;    LDA SHIFT ; 4
-;    BPL @tryaa ; 2/3
-;    ;STA $401
-;    CMP #$AB ; 2
-;    BNE @tryaa ; 2/3
 
 read_step_head_nopush:
     ; falls through when it's time to step the head
@@ -555,6 +517,7 @@ read_step_head_nopush:
     ; falls through if we're entering the last write sequence prior to enabling phase 1
     ; 31 cycles when falling through
 
+; 31 cycles in common case
 disk_read_loop_push:
     LDA SHIFT ; 4
     ; should normally fall through, will occasionally loop once when
@@ -568,9 +531,15 @@ disk_read_loop_push:
 
     BCC @notick ; 2/3
     STA $C030 ; 4
-    ;BCS @next ; 3 always
+    BCS @next ; 3 always
 
 @notick:
+    NOP
+    NOP
+    NOP
+
+@next:
+    NOP
     INX ; 2
     ROL
     CMP #$FF
@@ -622,6 +591,8 @@ disk_read_loop_pull:
     NOP
 
 @next:
+    NOP
+    NOP
     DEX ; 2
     BNE disk_read_loop_pull ; 2/3
 
