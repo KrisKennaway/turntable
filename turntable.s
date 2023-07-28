@@ -495,27 +495,27 @@ disk_read_loop_nopush:
     BPL disk_read_loop_nopush ; 2/3
 
     ; keep same timing padding in all 3 variants
-    ROR
-    NOP
     ;CMP #$D5
     ;BNE done2
-    NOP
-    NOP
+    ROR
+    ;NOP
+    ;NOP
+    ;NOP
 
 disk_read_loop_nopush_tail:
     BCC @notick ; 2/3
     STA $C030 ; 4
-    BCS @next ; 3 always
+    ;BCS @next ; 3 always
 
 @notick:
     ; 3+6 = 9
-    NOP
-    NOP
-    NOP
+    ;NOP
+    ;NOP
+    ;NOP
 @next:
-    STA ZPDUMMY
+    ;STA ZPDUMMY
 
-    DEX ; 2
+    DEX
     ;BEQ read_step_head_nopush ; 2/3
     BNE disk_read_loop_nopush ; 2/3
 
@@ -566,20 +566,20 @@ disk_read_loop_push:
 
     ; keep same timing padding in all 3 variants
     PHA
-    STA ZPDUMMY
+    ;STA ZPDUMMY
     ROR
 
-    BCC @notick ; 2/3
+    ;BCC @notick ; 2/3
     STA $C030 ; 4
-    BCS @next ; 3 always
+    ;BCS @next ; 3 always
 
 @notick:
     ; 3+6 = 9
-    NOP
-    NOP
-    NOP
+    ;NOP
+    ;NOP
+    ;NOP
 @next:
-    STA ZPDUMMY
+    ;STA ZPDUMMY
 
     DEX ; 2
     BNE disk_read_loop_push ; 2/3
@@ -604,7 +604,7 @@ disk_read_loop_push:
 read_step_head_push:
     ; falls through when it's time to step the head
     ; 30 cycles so far, need 32 to get back on 31-cycle cadence
-    STA ZPDUMMY
+    ;STA ZPDUMMY
 
 ;read_step_head_push0:
     INC loopctr ; 5
@@ -618,7 +618,7 @@ read_step_head_push:
     ; 2 reset inner loop counter1
     LDX #LOOP_INNER+1
 
-    STA ZPDUMMY
+    ;STA ZPDUMMY
     ; fall through to disk_read_loop_pull since phase 1 will be on and we couldn't
     ; write anything sensible
 
@@ -677,7 +677,7 @@ disk_read_loop_nopush2:
 
     ; keep same timing padding in all 3 variants
     ROR
-    STA ZPDUMMY
+    ;STA ZPDUMMY
     JMP disk_read_loop_nopush_tail
 
 done:
