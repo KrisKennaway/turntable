@@ -82,12 +82,12 @@ STEP_TABLE2_DATA:
 ;   which may flipping two different switches
 ; - XXX 84 is also used as a sentinel value to break out of push/pull
 ; - we make sure all of the 83 are in this table so we can filter for them in make_phase1_state_table
-.byte    $86, $86, $86, $89  ; X . . . ; track 0 ; 89 is a sentinel to enter the push/pull mode when phase 1 is active
+.byte    $86, $86, $86, $A0  ; X . . . ; track 0 ; 89 is a sentinel to enter the push/pull mode when phase 1 is active
 .byte    $83, $82, $83, $82  ; X X . . ; track 0.25
 .byte    $83, $82, $83, $82  ; . X . . ; track 0.5
 .byte    $83, $82, $83, $84  ; . X X . ; track 0.75 ; 82/84 swapped so we can use 84 as a sentinel to break out of push/pull
 .byte    $85, $85, $85, $85  ; . . X . ; track 1
-.byte    $87, $87, $87, $87  ; . . X X ; track 1.25
+.byte    $87, $87, $87, $87  ;  . X X ; track 1.25
 .byte    $84, $84, $84, $84  ; . . . X ; track 1.5 ; ok to use the 84 sentinel because we're not in the push/pull state
 .byte    $81, $81, $81, $81  ; X . . X ; track 1.75
 
@@ -335,7 +335,7 @@ write_step_head:
     NOP
     
     ; 2 reset inner loop counter1
-    LDX #LOOP_INNER ; we wrote an extra nibble
+    LDX #LOOP_INNER 
     BNE disk_write_loop ; 3 always
 
 write_prepare_phase1:
@@ -412,6 +412,10 @@ write_nibble9:
     ORA SHIFTBASE,Y ; 4
     RTS ; 6
 
+done2:
+    STA MOTOROFF
+    BRK
+
 prepare_read:
     LDA READ
 
@@ -446,35 +450,35 @@ prepare_read:
     BNE @tryd5 ; 2/3
     ; 14 cycles
 
-    ; Now do 33 cycle reads until we get a 0 indicating that we have
-    ; waited too long and the read register has been cleared
-    NOP    
-@0:
-    STA ZPDUMMY
-    INC $700 ; 6
-    NOP
-    NOP    
-    NOP
-    NOP
-    
-    LDA SHIFTBASE,y ; 4
-    STA $701 ; 4
-    ; 5
-    STA ZPDUMMY
-    NOP
-    BNE @0 ; 3
-
-    ; now we have just missed the trailing edge of the (~8 cycle) valid read window by 1 cycle,
-    ; so do a 27-cycle read this time to jump into the middle of the window and hopefully stay
-    ; mostly centered there.  Drive speed is not constant though so there is still some drift.
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
+;    ; Now do 33 cycle reads until we get a 0 indicating that we have
+;    ; waited too long and the read register has been cleared
+;    NOP    
+;@0:
+;    STA ZPDUMMY
+;    INC $700 ; 6
+;    NOP
+;    NOP    
+;    NOP
+;    NOP
+;    
+;    LDA SHIFTBASE,y ; 4
+;    STA $701 ; 4
+;    ; 5
+;    STA ZPDUMMY
+;    NOP
+;    BNE @0 ; 3
+;
+;    ; now we have just missed the trailing edge of the (~8 cycle) valid read window by 1 cycle,
+;    ; so do a 27-cycle read this time to jump into the middle of the window and hopefully stay
+;    ; mostly centered there.  Drive speed is not constant though so there is still some drift.
+;    NOP
+;    NOP
+;    NOP
+;    NOP
+;    NOP
 
     ; inner loop counter
-    LDX #LOOP_INNER
+    LDX #LOOP_INNER+1
 
 ; 31 cycles in the common case
 
@@ -493,6 +497,8 @@ disk_read_loop_nopush:
     ; keep same timing padding in all 3 variants
     ROR
     NOP
+    ;CMP #$D5
+    ;BNE done2
     NOP
     NOP
 
@@ -510,11 +516,28 @@ disk_read_loop_nopush_tail:
     STA ZPDUMMY
 
     DEX ; 2
+    ;BEQ read_step_head_nopush ; 2/3
     BNE disk_read_loop_nopush ; 2/3
+
+;disk_read_loop_nopush_try_2:
+;    LDA SHIFT ; 4
+;    BPL done2
+;
+;    ; keep same timing padding in all 3 variants
+;    STA ZPDUMMY
+;
+;   ; we don't have quite enough cycles to decide whether to tick, so just do it always
+;    STA $C030
+;
+;    STA ZPDUMMY
+;    ;STA ZPDUMMY
+;
+;    DEX ; 2
+;    BNE disk_read_loop_push ; 2/3
 
 read_step_head_nopush:
     ; falls through when it's time to step the head
-    ; 30 cycles so far, need 32 to get back on 31-cycle cadence
+    ; 29 or 30 cycles so far, need 32 to get back on 31-cycle cadence
 
     INC loopctr ; 5
     LDX a:loopctr ; 4
@@ -525,14 +548,13 @@ read_step_head_nopush:
     LDA $C000,Y ; 4 toggle next phase switch
 
     ; 2 reset inner loop counter1
-    LDX #LOOP_INNER
+    LDX #LOOP_INNER+1
 
     ; if STEP_TABLE2 == 89 then we are entering the last write sequence
     ; prior to enabling phase 1, so we need to transition to pushing stack values
-    CPY #$89+SLOTn0
-    BNE disk_read_loop_nopush ; 3 always
+    CPY #$00 ; XXX
+    BNE disk_read_loop_nopush ; 3
     ; falls through if we're entering the last write sequence prior to enabling phase 1
-
     ; 31 cycles when falling through
 
 disk_read_loop_push:
@@ -561,12 +583,30 @@ disk_read_loop_push:
 
     DEX ; 2
     BNE disk_read_loop_push ; 2/3
+    ;BEQ read_step_head_push0 ; 3 always
+
+;disk_read_loop_push_try_2:
+;    LDA SHIFT ; 4
+;    BPL done
+;
+;    ; keep same timing padding in all 3 variants
+;    PHA
+;
+;    ; we don't have quite enough cycles to decide whether to tick, so just do it always
+;    STA $C030
+;
+;    STA ZPDUMMY
+;    ; STA ZPDUMMY
+;
+;    DEX ; 2
+;    BNE disk_read_loop_push ; 2/3
 
 read_step_head_push:
     ; falls through when it's time to step the head
     ; 30 cycles so far, need 32 to get back on 31-cycle cadence
     STA ZPDUMMY
 
+;read_step_head_push0:
     INC loopctr ; 5
     LDX loopctr ; 3
     LDY STEP_TABLE1,X ; 4
@@ -576,7 +616,7 @@ read_step_head_push:
     LDA $C000,Y ; 4 toggle next phase switch
 
     ; 2 reset inner loop counter1
-    LDX #LOOP_INNER
+    LDX #LOOP_INNER+1
 
     STA ZPDUMMY
     ; fall through to disk_read_loop_pull since phase 1 will be on and we couldn't
@@ -620,7 +660,7 @@ read_step_head_pull:
     LDA $C000,Y ; 4 toggle next phase switch
 
     ; 2 reset inner loop counter1
-    LDX #LOOP_INNER
+    LDX #LOOP_INNER+1
 
     ; are we about to transition away from a push/pull phase 1 cycle?
     CPY #$84+SLOTn0
@@ -629,14 +669,14 @@ read_step_head_pull:
 
 ; same header as disk_read_loop_nopush so we can fall through and then jump back at a convenient point
 disk_read_loop_nopush2:
-    BIT SHIFT ; 4
+    LDA SHIFT ; 4
     ; should normally fall through, will occasionally loop once when
     ; we have slipped a cycle and the nibble is not ready after 31
     ; cycles
     BPL disk_read_loop_nopush2 ; 2/3
 
     ; keep same timing padding in all 3 variants
-    NOP
+    ROR
     STA ZPDUMMY
     JMP disk_read_loop_nopush_tail
 
