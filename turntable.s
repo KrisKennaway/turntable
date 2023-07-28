@@ -38,10 +38,15 @@ loopctr = $03 ; .. $04
 STEP_TABLE1 = $4000
 STEP_TABLE2 = $4100
 PHASE1STATE_TABLE = $4200
-data = $4300
+IO_BUF = $4300 ; 1K ProDOS I/O buffer
+DATA_BUF = $4700
 
 WAIT = $FCA8
 BELL = $FF3A
+
+MLI = $BF00
+MLI_OPEN = $C8
+MLI_READ = $CA
 
 SLINKY_SLOTn0 = $40
 SLINKY_ADDRL = $C080+SLINKY_SLOTn0
@@ -127,24 +132,6 @@ make_phase1_state_table:
     INX
     BNE @0
 
-; bit 0 signals speaker status, with bit 6 additional used during phase 1 (reverse order during batch)
-;make_data:
-;    ; zero out data buffer
-;    LDX #$00
-;    LDA #$BE ; 0b10111110
-;@0:
-;    STA data,X
-;    INX
-;    BNE @0
-;
-;    LDA #$FF
-;    STA data
-;    STA data+20
-;    STA data+40
-;    STA data+60
-;    STA data+80
-;    STA data+100
-
 seek_track0:
 ; Step to track 0
     LDY #$80 ; current half-track count
@@ -178,10 +165,6 @@ prepare:
     LDA #$00
     STA loopctr
 
-    STA SLINKY_ADDRL
-    STA SLINKY_ADDRM
-    STA SLINKY_ADDRH
-
 @0:
     LDA $C000
     BPL @0
@@ -196,6 +179,12 @@ prepare:
     JMP @0
 @2:
     JSR load_slinky
+
+    LDA #$00
+    STA SLINKY_ADDRL
+    STA SLINKY_ADDRM
+    STA SLINKY_ADDRH
+
     JMP prepare_write
 
 prepare_write:
@@ -305,21 +294,18 @@ prepare_write:
 disk_write_loop:
     NOP
     NOP
-
-    ; need to turn off phase 1 around all writes because the Disk II hardware suppresses writes if it is enabled
-    ; We disable it unconditionally here and enable it conditionally later on, which saves some cycles
-    LDY #$60 ; 2 XXX try to keep invariant
     
     LDA SLINKY_DATA ; 4 byte to write
 
     ; write the data
+    LDY #$60 ; 2 XXX try to keep invariant
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
-    STA ZPDUMMY
-    NOP
-        
     STA ZPDUMMY ; 3
+    STA ZPDUMMY ; 3
+    NOP
+    
     DEX ; 2
     BNE disk_write_loop ; 2/3
     ; falls through when it is time to step the head
@@ -349,18 +335,19 @@ write_step_head:
     NOP
     
     ; 2 reset inner loop counter1
-    LDX #LOOP_INNER-1 ; we wrote an extra nibble
+    LDX #LOOP_INNER ; we wrote an extra nibble
     BNE disk_write_loop ; 3 always
 
 write_prepare_phase1:
-    LDX #LOOP_INNER - 11 ; we're going to write 10 FF40 sync bytes
+    ; XXX is this the right length?
+    LDX #LOOP_INNER - 10 ; we're going to write 8 FF40 sync bytes which takes the same as 10 32-cycle writes
     NOP
     NOP
 
 disk_write_loop_phase1:
     STA ZPDUMMY ; 3
-    NOP
     STA ZPDUMMY
+    NOP
     
     ; write the data
     LDY #$60 ; 2 XXX try to keep invariant
@@ -369,15 +356,15 @@ disk_write_loop_phase1:
     CMP SHIFTBASE,Y ; 4
 
     STA ZPDUMMY
-    NOP
-        
     STA ZPDUMMY ; 3
+    NOP
+    
     DEX ; 2
     BNE disk_write_loop_phase1 ; 2/3
 
     LDX #$7
 
-; write 7 FF40 bytes so the next write phase is synced
+; write 7 more FF40 bytes so the next write phase is synced
 write_ff40:
     STA ZPDUMMY ; 3
     STA PHASE1OFF ; could do it outside the loop too
@@ -520,7 +507,7 @@ disk_read_loop_nopush_tail:
     NOP
     NOP
 @next:
-    PHP
+    STA ZPDUMMY
 
     DEX ; 2
     BNE disk_read_loop_nopush ; 2/3
@@ -657,12 +644,6 @@ done:
     STA MOTOROFF
     BRK
 
-MLI = $BF00
-MLI_OPEN = $C8
-MLI_READ = $CA
-IO_BUF = $4400
-DATA_BUF = $4800
-
 load_slinky:
     LDX #$00
     STX SLINKY_ADDRL
@@ -726,6 +707,7 @@ playback:
 
 @next:
     STA $401
+    ; end playback on keypress
     BIT $C000
     BMI @done
     NOP
@@ -734,9 +716,7 @@ playback:
 
 @done:
     BIT $C010
-
     RTS
-
 
 open_cmdlist:
     .byte $03 ; param_count

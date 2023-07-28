@@ -17,8 +17,9 @@ clean:
 	rm -f $(objects) $(system_files) $(DISKIMAGE)
 
 $(DISKIMAGE): $(bin_files) $(system_files)
-	cp make/prodos_template.dsk $(DISKIMAGE)
+	cp make/blank.dsk $(DISKIMAGE)
 	java -jar make/AppleCommander.jar -d $(DISKIMAGE) NS.CLOCK.SYSTEM
 	java -jar make/AppleCommander.jar -d $(DISKIMAGE) LOADER.SYSTEM
 
 	java -jar make/AppleCommander.jar -as $(DISKIMAGE) tt.system < turntable.system
+	java -jar make/AppleCommander.jar -p $(DISKIMAGE) SOUND.DATA BIN 0x2000 < out.a2d
