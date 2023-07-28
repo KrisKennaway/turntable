@@ -66,7 +66,7 @@ STEP_SIZE = 12
 
 
 def main():
-    sample_rate = int(1020400/32 * 0.9)
+    sample_rate = int(1020400/32)
     input_audio = preprocess_audio("kris.wav", sample_rate, 0.8, 99)
 
     pos = 0.0
@@ -121,14 +121,16 @@ def main():
     bytestream = []
     for i, chunk in enumerate(chunks):
         chunk = chunk[:BATCH_SIZE - 2]
-
+    
         push_phase = PUSH_PHASE[i % 32]
 
         if not push_phase:
-            bytestream.extend(0b11111111 if s else 0b11111110 for s in chunk)
+            disk_chunk = [0b11011101 if s else 0b11011100 for s in chunk]
+            disk_chunk[-1] = 0xff
+            bytestream.extend(disk_chunk)
             continue
 
-        mux_chunk = [0b10111111 if s else 0b10111110 for s in chunk]
+        mux_chunk = [0b10011101 if s else 0b10011100 for s in chunk]
 
         if i < len(chunks) - 1:
             next_chunk = chunks[i+1][:BATCH_SIZE - 2]
@@ -138,6 +140,7 @@ def main():
         for j, s in enumerate(reversed(next_chunk)):
             if s:
                 mux_chunk[j] ^= 0b01000000
+        mux_chunk[-1] = 0xff
         bytestream.extend(mux_chunk)
 
     with open("out.a2d", "wb+") as f:

@@ -82,7 +82,7 @@ STEP_TABLE2_DATA:
 ;   which may flipping two different switches
 ; - XXX 84 is also used as a sentinel value to break out of push/pull
 ; - we make sure all of the 83 are in this table so we can filter for them in make_phase1_state_table
-.byte    $86, $86, $86, $A0  ; X . . . ; track 0 ; 89 is a sentinel to enter the push/pull mode when phase 1 is active
+.byte    $86, $86, $86, $89  ; X . . . ; track 0 ; 89 is a sentinel to enter the push/pull mode when phase 1 is active
 .byte    $83, $82, $83, $82  ; X X . . ; track 0.25
 .byte    $83, $82, $83, $82  ; . X . . ; track 0.5
 .byte    $83, $82, $83, $84  ; . X X . ; track 0.75 ; 82/84 swapped so we can use 84 as a sentinel to break out of push/pull
@@ -310,12 +310,25 @@ disk_write_loop:
     BNE disk_write_loop ; 2/3
     ; falls through when it is time to step the head
 
+    STA ZPDUMMY
+    STA ZPDUMMY
+    STA ZPDUMMY
+    LDA #$FF
+
+    STA LOADBASE,Y ; 5
+    CMP SHIFTBASE,Y ; 4
+
+    STA ZPDUMMY
+    STA ZPDUMMY
+    STA ZPDUMMY
+    STA ZPDUMMY
+
 write_step_head:
     INC loopctr ; 5
     NOP
 
     LDY #$60
-    LDA #$FF ; 2
+    LDA #$D5 ; 2
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
@@ -326,7 +339,7 @@ write_step_head:
     LDA $C000,X ; 4 toggle next phase switch
 
     LDX #$60
-    LDA #$FF ; 2
+    LDA #$AB ; 2
     STA LOADBASE,X ; 5
     CMP SHIFTBASE,X ; 4
 
@@ -394,14 +407,15 @@ write_ff40:
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
+    ;17
+    STA ZPDUMMY
+    STA ZPDUMMY
     STA ZPDUMMY
     NOP
     NOP
     NOP
     NOP
-    NOP
-    NOP
-    NOP
+
     JMP write_step_head
 
 write_nibble9:
@@ -478,7 +492,7 @@ prepare_read:
 ;    NOP
 
     ; inner loop counter
-    LDX #LOOP_INNER+1
+    ; LDX #LOOP_INNER+1
 
 ; 31 cycles in the common case
 
@@ -494,65 +508,49 @@ disk_read_loop_nopush:
     ; cycles
     BPL disk_read_loop_nopush ; 2/3
 
-    ; keep same timing padding in all 3 variants
-    ;CMP #$D5
-    ;BNE done2
     ROR
-    ;NOP
-    ;NOP
-    ;NOP
-
-disk_read_loop_nopush_tail:
     BCC @notick ; 2/3
     STA $C030 ; 4
-    ;BCS @next ; 3 always
 
 @notick:
-    ; 3+6 = 9
-    ;NOP
-    ;NOP
-    ;NOP
-@next:
-    ;STA ZPDUMMY
-
-    DEX
-    ;BEQ read_step_head_nopush ; 2/3
+    ROL
+    CMP #$FF
     BNE disk_read_loop_nopush ; 2/3
 
-;disk_read_loop_nopush_try_2:
+; resync with sector lead
+@startsync:
+    ;LDA SHIFT ; XXX
+    ;BPL @startsync
+;@tryd5:
+;    ;STA $400
+;    EOR #$D5
+;    BNE @startsync
+@tryaa:
 ;    LDA SHIFT ; 4
-;    BPL done2
-;
-;    ; keep same timing padding in all 3 variants
-;    STA ZPDUMMY
-;
-;   ; we don't have quite enough cycles to decide whether to tick, so just do it always
-;    STA $C030
-;
-;    STA ZPDUMMY
-;    ;STA ZPDUMMY
-;
-;    DEX ; 2
-;    BNE disk_read_loop_push ; 2/3
+;    BPL @tryaa ; 2/3
+;    ;STA $401
+;    CMP #$AB ; 2
+;    BNE @tryaa ; 2/3
 
 read_step_head_nopush:
     ; falls through when it's time to step the head
     ; 29 or 30 cycles so far, need 32 to get back on 31-cycle cadence
 
     INC loopctr ; 5
-    LDX a:loopctr ; 4
+    LDX loopctr ; 3
+
     LDY STEP_TABLE1,X ; 4
     LDA $C000,Y ; 4 toggle next phase switch
-
     LDY STEP_TABLE2,X ; 4
     LDA $C000,Y ; 4 toggle next phase switch
 
     ; 2 reset inner loop counter1
-    LDX #LOOP_INNER+1
+    ; LDX #LOOP_INNER+1
+    LDX #$00
 
     ; if STEP_TABLE2 == 89 then we are entering the last write sequence
     ; prior to enabling phase 1, so we need to transition to pushing stack values
-    CPY #$00 ; XXX
+    CPY #$89+SLOTn0
     BNE disk_read_loop_nopush ; 3
     ; falls through if we're entering the last write sequence prior to enabling phase 1
     ; 31 cycles when falling through
@@ -566,47 +564,26 @@ disk_read_loop_push:
 
     ; keep same timing padding in all 3 variants
     PHA
-    ;STA ZPDUMMY
     ROR
 
-    ;BCC @notick ; 2/3
+    BCC @notick ; 2/3
     STA $C030 ; 4
     ;BCS @next ; 3 always
 
 @notick:
-    ; 3+6 = 9
-    ;NOP
-    ;NOP
-    ;NOP
-@next:
-    ;STA ZPDUMMY
-
-    DEX ; 2
+    INX ; 2
+    ROL
+    CMP #$FF
     BNE disk_read_loop_push ; 2/3
     ;BEQ read_step_head_push0 ; 3 always
-
-;disk_read_loop_push_try_2:
-;    LDA SHIFT ; 4
-;    BPL done
-;
-;    ; keep same timing padding in all 3 variants
-;    PHA
-;
-;    ; we don't have quite enough cycles to decide whether to tick, so just do it always
-;    STA $C030
-;
-;    STA ZPDUMMY
-;    ; STA ZPDUMMY
-;
-;    DEX ; 2
-;    BNE disk_read_loop_push ; 2/3
 
 read_step_head_push:
     ; falls through when it's time to step the head
     ; 30 cycles so far, need 32 to get back on 31-cycle cadence
     ;STA ZPDUMMY
+    TXA
+    PHA ; store how many bytes we pushed
 
-;read_step_head_push0:
     INC loopctr ; 5
     LDX loopctr ; 3
     LDY STEP_TABLE1,X ; 4
@@ -616,14 +593,17 @@ read_step_head_push:
     LDA $C000,Y ; 4 toggle next phase switch
 
     ; 2 reset inner loop counter1
-    LDX #LOOP_INNER+1
+    ; LDX #LOOP_INNER+1
 
     ;STA ZPDUMMY
     ; fall through to disk_read_loop_pull since phase 1 will be on and we couldn't
     ; write anything sensible
 
+    PLA
+    TAX
+
+; 28 cycles instead of 32 - so we know we'll finish ahead of schedule
 disk_read_loop_pull:
-    NOP
     NOP
     NOP
 
@@ -635,50 +615,50 @@ disk_read_loop_pull:
     BVC @notick ; 2/3
     STA $C030 ; 4
     BVS @next ; 3 always
-
 @notick:
     ; 3+6 = 9
     NOP
     NOP
     NOP
-@next:
-    STA ZPDUMMY
 
+@next:
     DEX ; 2
     BNE disk_read_loop_pull ; 2/3
+
+; resync with sector lead
+@startsync:
+    LDA SHIFT ; XXX
+    BPL @startsync
+@tryd5:
+    ;STA $400
+    EOR #$D5
+    BNE @startsync
+@tryaa:
+    LDA SHIFT ; 4
+    BPL @tryaa ; 2/3
+    ;STA $401
+    CMP #$AB ; 2
+    BNE @tryd5 ; 2/3
+
+    ; XXX need to add one more padding byte at start of sector
 
 read_step_head_pull:
     ; falls through when it's time to step the head
     ; 30 cycles so far, need 32 to get back on 31-cycle cadence
 
     INC loopctr ; 5
-    LDX a:loopctr ; 4
+    LDX loopctr ; 3
     LDY STEP_TABLE1,X ; 4
     LDA $C000,Y ; 4 toggle next phase switch
 
     LDY STEP_TABLE2,X ; 4
     LDA $C000,Y ; 4 toggle next phase switch
 
-    ; 2 reset inner loop counter1
-    LDX #LOOP_INNER+1
-
     ; are we about to transition away from a push/pull phase 1 cycle?
     CPY #$84+SLOTn0
     BNE disk_read_loop_push ; 3
-    ; falls through
 
-; same header as disk_read_loop_nopush so we can fall through and then jump back at a convenient point
-disk_read_loop_nopush2:
-    LDA SHIFT ; 4
-    ; should normally fall through, will occasionally loop once when
-    ; we have slipped a cycle and the nibble is not ready after 31
-    ; cycles
-    BPL disk_read_loop_nopush2 ; 2/3
-
-    ; keep same timing padding in all 3 variants
-    ROR
-    ;STA ZPDUMMY
-    JMP disk_read_loop_nopush_tail
+    JMP disk_read_loop_nopush
 
 done:
     STA MOTOROFF
