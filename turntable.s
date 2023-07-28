@@ -489,7 +489,7 @@ disk_read_loop_nopush:
     NOP
 
     STA ZPDUMMY
-    NOP
+    ;NOP
     
     CMP #$FF
     BNE disk_read_loop_nopush ; 2/3
@@ -517,7 +517,7 @@ read_step_head_nopush:
     ; falls through if we're entering the last write sequence prior to enabling phase 1
     ; 31 cycles when falling through
 
-; 31 cycles in common case
+; 29 cycles in common case
 disk_read_loop_push:
     LDA SHIFT ; 4
     ; should normally fall through, will occasionally loop once when
@@ -539,7 +539,7 @@ disk_read_loop_push:
     NOP
 
 @next:
-    NOP
+    ;NOP
     INX ; 2
     ROL
     CMP #$FF
