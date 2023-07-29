@@ -569,6 +569,8 @@ prepare_read:
     BNE @tryd5 ; 2/3
     ; 14 cycles
 
+
+    LDX #$00
 ; need 3 variants
 ; 1. straight playback
 ; 2. push onto stack, previous to phase 1 on
@@ -576,29 +578,32 @@ prepare_read:
 
 ; 29 cycles in common case
 disk_read_loop_nopush:
-    LDX SHIFT ; 4
+    LDY SHIFT ; 4
     ; should normally fall through, will occasionally loop once when
     ; we have slipped a cycle and the nibble is not ready after 31
     ; cycles
     BPL disk_read_loop_nopush ; 2/3
 
 decode_track_ref0:
-    LDA DECODE_TRACK0,X
-    STA ZPDUMMY
+    LDA DECODE_TRACK0,Y
+    ;STA ZPDUMMY
 
     BPL @notick ; 2/3
     STA $C030 ; 4
-    BMI @next
+    ;BMI @next
 
 @notick:
-    NOP
-    NOP
-    NOP
+    ;NOP
+    ;NOP
+    ;NOP
 
 @next:
-    NOP
+    ;NOP
     
-    CPX #$AA ; end of sector marker
+    INX ; 2 count how many we are pushing
+    BEQ read_step_head_nopush ; in case we overflow
+
+    CPY #$AA ; end of sector marker
     BNE disk_read_loop_nopush ; 2/3
     ; falls through when it's time to step the head
 
@@ -634,15 +639,16 @@ decode_track_ref1:
 
     BPL @notick ; 2/3
     STA $C030 ; 4
-    BMI @next ; 3 always
+    ;BMI @next ; 3 always
 
 @notick:
-    NOP
-    NOP
-    NOP
+    ;NOP
+    ;NOP
+    ;NOP
 
 @next:
     INX ; 2 count how many we are pushing
+    BEQ read_step_head_push ; in case we overflow
 
     CPY #$AA ; end of sector marker
     BNE disk_read_loop_push ; 2/3
@@ -668,9 +674,8 @@ read_step_head_push:
 
 ; 28 cycles instead of 32 - so we know we'll finish ahead of schedule
 disk_read_loop_pull:
-    NOP
-    NOP
-    NOP
+    BIT $C000
+    BMI restart
 
     ; keep same timing padding in all 3 variants
     PLP
@@ -721,11 +726,16 @@ read_step_head_pull:
     CPY #$84+SLOTn0
     BNE disk_read_loop_push ; 3
 
+    LDX #$00
+
     JMP disk_read_loop_nopush
 
 done:
     STA MOTOROFF
     BRK
+
+restart:
+    JMP seek_track0
 
 load_slinky:
     LDX #$00
