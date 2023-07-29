@@ -74,69 +74,46 @@ SLINKY_DATA = $C083+SLINKY_SLOTn0
 @done:
     JMP make_step_table
 
-; STEP_TABLE: (entries have SLOTn0 added)
-
 STEP_TABLE1_DATA:
-; XXX use PHASE1OFF_BASE etc
-; XXX constants for sentinels
-;.byte    $86, $86, $86, $86  ; X . . . ; track 0
+; TODO: use PHASE1OFF_BASE etc
+; TODO: constants for sentinels
 .byte    $86, $86, $86, $86  ; X . . . ; track 0
-
-;.byte    $81, $80, $81, $80  ; X X . . ; track 0.25
 .byte    $81, $80, $81, $80  ; X X . . ; track 0.25
-
-;.byte    $80, $80, $80, $80  ; . X . . ; track 0.5
 .byte    $80, $80, $80, $80  ; . X . . ; track 0.5
-
-;.byte    $85, $84, $85, $84  ; . X X . ; track 0.75
 .byte    $85, $84, $85, $82  ; . X X . ; track 0.75 XXX 82/84 swapped so we can use 84 as a sentinel
-
-;.byte    $82, $82, $82, $82  ; . . X . ; track 1
 .byte    $82, $82, $82, $82  ; . . X . ; track 1
-
-;.byte    $87, $87, $87, $87  ; . . X X ; track 1.25
 .byte    $87, $87, $87, $87  ; . . X X ; track 1.25
-
-;.byte    $84, $84, $84, $84  ; . . . X ; track 1.5
 .byte    $84, $84, $84, $84  ; . . . X ; track 1.5
-
-;.byte    $81, $81, $81, $81  ; X . . X ; track 1.75
 .byte    $81, $81, $81, $81  ; X . . X ; track 1.75
 
 STEP_TABLE2_DATA:
-; values are the same as STEP_TABLE1_DATA except when:
-; - the next batch will turn phase 1 on ($89 = MOTORON is used as a sentinel for this)
-; - we need to turn phase 1 on and off on alternating batches,
-;   which may flipping two different switches
-; - XXX 84 is also used as a sentinel value to break out of push/pull
-; - we make sure all of the 83 are in this table so we can filter for them in make_phase1_state_table
+; In most cases we only need to flip one phase switch in order to move between tracks, so these
+; values are the same as STEP_TABLE1_DATA.
+;
+; The only reason we need a second table is to handle the fact that the Disk II disables writes
+; when phase 1 is active (i.e. tracks 0.25..0.75 mod 2).  To work around this, when we are
+; working in this region we can only enable phase 1 for one sector at a time.  During the
+; previous sector we prepare by pushing data onto the stack, and then pulling from it during
+; the phase 1-enabled sector.
+;
+; To signal this we need two sentinel values:
+; - $89 (=MOTORON) is used to indicate that the next sector begins an alternating phase 1 on/off
+;   region
+; - $84 indicates that we are leaving this region
+; - we also make sure all of the $83 (=PHASE1_ON) are in this table instead of table 1 so we can
+;   filter for them in make_phase1_state_table below
 
-;.byte    $86, $86, $86, $86  ; X . . . ; track 0 ;
-.byte    $86, $86, $86, $89  ; X . . . ; track 0 ; 89 is a sentinel to enter the push/pull mode when phase 1 is active
-
-;.byte    $83, $82, $83, $82  ; X X . . ; track 0.25
+.byte    $86, $86, $86, $89  ; X . . . ; track 0 ; $89 is a sentinel to enter the push/pull mode when phase 1 is active
 .byte    $83, $82, $83, $82  ; X X . . ; track 0.25
-
-;.byte    $83, $82, $83, $82  ; . X . . ; track 0.5
 .byte    $83, $82, $83, $82  ; . X . . ; track 0.5
-
-;.byte    $83, $82, $83, $82  ; . X X . ; track 0.75 ;
 .byte    $83, $82, $83, $84  ; . X X . ; track 0.75 ; 82/84 swapped so we can use 84 as a sentinel to break out of push/pull
-
-;.byte    $85, $85, $85, $85  ; . . X . ; track 1
 .byte    $85, $85, $85, $85  ; . . X . ; track 1
-
-;.byte    $87, $87, $87, $87  ; . . X X ; track 1.25
 .byte    $87, $87, $87, $87  ; . . X X ; track 1.25
-
-;.byte    $84, $84, $84, $84  ; . . . X ; track 1.5 ; ok to use the 84 sentinel because we're not in the push/pull state
-.byte    $84, $84, $84, $84  ; . . . X ; track 1.5 ; ok to use the 84 sentinel because we're not in the push/pull state
-
-;.byte    $81, $81, $81, $81  ; X . . X ; track 1.75
+.byte    $84, $84, $84, $84  ; . . . X ; track 1.5 ; ok to use the 84 sentinel here because we're not in the push/pull state
 .byte    $81, $81, $81, $81  ; X . . X ; track 1.75
 
+; Populate a full page each from 8 copies of the above step tables.  That lets us easily iterate through without worrying about index bounds.
 make_step_table:
-
     LDX #$00
 @0:
     TXA
@@ -154,6 +131,9 @@ make_step_table:
     INX
     BNE @0
 
+; Construct another table that has non-zero entries whenever phase 1 is active.  We need this when writing
+; the disk image so we can write sync bytes leading in to the next sector.
+; 
 ; PHASE1STATE_TABLE == $83 if STEP_TABLE2_DATA == $83+SLOTn0 else $82
 ;
 ; here we don't pre-index by SLOTn0 because we need to do indirect addressing anyway at the point of use
@@ -198,7 +178,7 @@ seek_track0:
     DEY
     BPL @seek0
 
-; Prepare to begin
+; Prepare for read or write
 prepare:
     ; enable phase 0
     LDA PHASE0ON
@@ -209,6 +189,9 @@ prepare:
     LDA #$00
     STA loopctr
 
+; wait for a keypress
+; 1..3 plays the corresponding audio track
+; W writes a new disk image (must be a blank disk)
 @wait_key:
     LDA $C000
     BPL @wait_key
@@ -236,6 +219,7 @@ prepare:
     JMP @wait_key
 
 prepare_write:
+    ; read data from disk and stage it into Slinky RAM so we can stream it back while writing
     JSR load_slinky
 
     LDA #$00
@@ -283,7 +267,6 @@ prepare_write:
     JSR wait26
     STA ZPDUMMY
 
-    ; XXX write fewer
     LDX #$FF ; number of sync bytes to write
     STA LOADBASE,Y 
     CMP SHIFTBASE,Y
@@ -307,7 +290,7 @@ prepare_write:
     PHA
     PLA
 
-    ; write header
+    ; write track header
     LDA #$D5
     JSR write_nibble9 ; 6 + 9 + (STA/CMP) + 6
     LDA #$AA ; 2
@@ -317,6 +300,7 @@ prepare_write:
     STA ZPDUMMY
     NOP
 
+    ; Begin writing sectors
     ; inner loop counter
     LDX #LOOP_INNER
 disk_write_loop:
@@ -355,6 +339,7 @@ disk_write_loop:
     PHA
     PLA
 
+; We've written a sector, now actuate the next sector's phase switches, which may begin stepping the head.
 write_step_head:
     INC loopctr ; 5
     NOP
@@ -596,7 +581,7 @@ prepare_read:
     ; 14 cycles
 
 
-    LDX #$00
+    ;LDX #$00
 ; need 3 variants
 ; 1. straight playback
 ; 2. push onto stack, previous to phase 1 on
@@ -616,18 +601,18 @@ decode_track_ref0:
 
     BPL @notick ; 2/3
     STA $C030 ; 4
-    ;BMI @next
+    BMI @next
 
 @notick:
-    ;NOP
-    ;NOP
-    ;NOP
+    NOP
+    NOP
+    NOP
 
 @next:
     ; NOP
     
-    INX ; 2 count how many we have read
-    BEQ read_step_head_nopush ; in case we overflow
+    ;INX ; 2 count how many we have read
+    ;BEQ read_step_head_nopush ; in case we overflow
 
     CPY #$AA ; end of sector marker
     BNE disk_read_loop_nopush ; 2/3
@@ -665,16 +650,16 @@ decode_track_ref1:
 
     BPL @notick ; 2/3
     STA $C030 ; 4
-    ;BMI @next ; 3 always
+    BMI @next ; 3 always
 
 @notick:
-    ;NOP
-    ;NOP
-    ;NOP
+    NOP
+    NOP
+    NOP
 
 @next:
     INX ; 2 count how many we are pushing
-    BEQ read_step_head_push ; in case we overflow
+    ;BEQ read_step_head_push ; in case we overflow
 
     CPY #$AA ; end of sector marker
     BNE disk_read_loop_push ; 2/3
