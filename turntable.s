@@ -162,8 +162,8 @@ make_phase1_state_table:
     INX
     BNE @0
     
-seek_track0:
 ; Step to track 0
+seek_track0:
     LDY #$80 ; current half-track count
     LDX #$00
 @seek0:
@@ -189,19 +189,20 @@ prepare:
     LDA #$00
     STA loopctr
 
-@0:
+@wait_key:
     LDA $C000
-    BPL @0
+    BPL @wait_key
     BIT $C010
     CMP #$d2 ; 'R'
-    BNE @1
+    BNE @check_write
     JMP prepare_read
-@1:
+@check_write:
     CMP #$D7 ; 'W'
-    BEQ @2
+    BEQ prepare_write
     JSR BELL
-    JMP @0
-@2:
+    JMP @wait_key
+
+prepare_write:
     JSR load_slinky
 
     LDA #$00
@@ -209,9 +210,6 @@ prepare:
     STA SLINKY_ADDRM
     STA SLINKY_ADDRH
 
-    JMP prepare_write
-
-prepare_write:
     ; allow time to settle
     ; TODO: excessive
     LDA #$FF
@@ -248,21 +246,9 @@ prepare_write:
     STA WRITEBASE,Y 
     CMP SHIFTBASE,Y
 
-    ; XXX use fewer bytes
+    ; 29 cycles
+    JSR wait26
     STA ZPDUMMY
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
 
     ; XXX write fewer
     LDX #$FF ; number of sync bytes to write
@@ -270,23 +256,12 @@ prepare_write:
     CMP SHIFTBASE,Y
 
     ; 40 - 9 = 31 cycles
-    ; XXX use fewer bytes
+    ; 5
     STA ZPDUMMY
     NOP
 @0:
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
+    ; 26 cycles
+    JSR wait26
 
     STA LOADBASE,Y
     CMP SHIFTBASE,Y
@@ -294,11 +269,10 @@ prepare_write:
     BNE @0
 
     ; make sure last sync byte is a FF40 too
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
+    ; 10
+    STA ZPDUMMY
+    PHA
+    PLA
 
     ; write header
     LDA #$D5
@@ -323,26 +297,30 @@ disk_write_loop:
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
-    STA ZPDUMMY ; 3
-    STA ZPDUMMY ; 3
+    ; 8
+    NOP
+    NOP
+    NOP
     NOP
     
     DEX ; 2
     BNE disk_write_loop ; 2/3
     ; falls through when it is time to step the head
 
-    STA ZPDUMMY
-    STA ZPDUMMY
-    STA ZPDUMMY
-    LDA #$FF
+    ; 9
+    NOP
+    PHA
+    PLA
 
+    LDA #$FF
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
+    ; 12
+    NOP
     STA ZPDUMMY
-    STA ZPDUMMY
-    STA ZPDUMMY
-    STA ZPDUMMY
+    PHA
+    PLA
 
 write_step_head:
     INC loopctr ; 5
@@ -373,24 +351,27 @@ write_step_head:
     BNE disk_write_loop ; 3 always
 
 write_prepare_phase1:
-    ; XXX is this the right length?
     LDX #LOOP_INNER - 10 ; we're going to write 8 FF40 sync bytes which takes the same as 10 32-cycle writes
     NOP
     NOP
 
 disk_write_loop_phase1:
-    STA ZPDUMMY ; 3
-    STA ZPDUMMY
+    ;8
+    NOP
+    NOP
+    NOP
     NOP
     
     ; write the data
     LDY #$60 ; 2 XXX try to keep invariant
-    ; XXX no actual need
+    ; XXX no actual need to write here because phase 1 is on
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
-    STA ZPDUMMY
-    STA ZPDUMMY ; 3
+    ; 8
+    NOP
+    NOP
+    NOP
     NOP
     
     DEX ; 2
@@ -406,22 +387,17 @@ write_ff40:
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
-    STA ZPDUMMY
-    STA ZPDUMMY
-    STA ZPDUMMY
+    ; 14
+    JSR wait12
     NOP
-    NOP
-    NOP
-    NOP
-
 
     DEX
     BNE write_ff40
-    NOP
-    NOP
-    NOP
-    NOP
-    NOP
+
+    ; 10
+    STA ZPDUMMY
+    PHA
+    PLA
 
     ; one more FF40
     ; XXX roll this up
@@ -429,12 +405,8 @@ write_ff40:
     CMP SHIFTBASE,Y ; 4
 
     ;17
+    JSR wait12
     STA ZPDUMMY
-    STA ZPDUMMY
-    STA ZPDUMMY
-    NOP
-    NOP
-    NOP
     NOP
 
     JMP write_step_head
@@ -446,6 +418,15 @@ write_nibble9:
     STA LOADBASE,Y ; 5
     ORA SHIFTBASE,Y ; 4
     RTS ; 6
+
+wait26:
+    PHA
+    PLA
+wait19:
+    PHA
+    PLA
+wait12:
+    RTS
 
 done2:
     STA MOTOROFF
@@ -461,8 +442,6 @@ prepare_read:
 @read:
     lda SHIFTBASE,y
     bpl @read
-    INC $600
-    STA $601
     cmp #$FF
     bne @loop
     dex
@@ -472,7 +451,6 @@ prepare_read:
 @startsync:
     LDA SHIFTBASE,Y ; XXX
     BPL @startsync
-    STA $400
 @tryd5:
     EOR #$D5
     BNE @startsync
@@ -481,14 +459,13 @@ prepare_read:
     LDA SHIFTBASE,Y ; 4
     BPL @tryaa ; 2/3
     CMP #$AA ; 2
-    STA $401 ; 4
     BNE @tryd5 ; 2/3
     ; 14 cycles
 
 ; need 3 variants
 ; 1. straight playback
 ; 2. push onto stack, previous to phase 1 on
-; 3. pull from stack, during phase 1
+; 3. pull from stack, during phase 1 on
 
 ; 29 cycles in common case
 disk_read_loop_nopush:
