@@ -30,15 +30,20 @@ WRITEBASE = $C08F
 
 ; zero page
 ; TODO: use unused addresses
-ZPDUMMY = $02
-loopctr = $03
+loopctr = $00
+ZPDUMMY = $01
+savex = $03
+bit6_value = $04
 
 ; internal buffers
 STEP_TABLE1 = $4000
 STEP_TABLE2 = $4100
 PHASE1STATE_TABLE = $4200
-IO_BUF = $4300 ; 1K ProDOS I/O buffer
-DATA_BUF = $4700
+DECODE_TRACK0 = $4300 ; maps bits 1, 0 of decoded nibble value to bits 7, 6
+DECODE_TRACK1 = $4400 ; maps bits 3, 2 of decoded nibble value to bits 7, 6
+DECODE_TRACK2 = $4500 ; maps bits 5, 4 of decoded nibble value to bits 7, 6
+IO_BUF = $4600 ; 1K ProDOS I/O buffer
+DATA_BUF = $4a00
 
 WAIT = $FCA8
 BELL = $FF3A
@@ -54,9 +59,6 @@ SLINKY_ADDRH = $C082+SLINKY_SLOTn0
 SLINKY_DATA = $C083+SLINKY_SLOTn0
 
 .proc main
-    ; spin up disk
-    LDA DISK1SELECT
-    LDA MOTORON
 
     JMP make_step_table
 
@@ -162,6 +164,12 @@ make_phase1_state_table:
     INX
     BNE @0
     
+    JSR build_nibble_tables
+
+    ; spin up disk
+    LDA DISK1SELECT
+    LDA MOTORON
+
 ; Step to track 0
 seek_track0:
     LDY #$80 ; current half-track count
@@ -193,12 +201,25 @@ prepare:
     LDA $C000
     BPL @wait_key
     BIT $C010
-    CMP #$d2 ; 'R'
-    BNE @check_write
+
+    ; check 1..3
+    CMP #$b1 ; '1'
+    BCC @check_write
+    CMP #$b4; '4'
+    BCS @check_write
+
+    ; patch up track decode table references
+    SEC
+    SBC #($b1 - >DECODE_TRACK0)
+    STA decode_track_ref0+2
+    STA decode_track_ref1+2
+
     JMP prepare_read
 @check_write:
     CMP #$D7 ; 'W'
     BEQ prepare_write
+
+    ; unknown command
     JSR BELL
     JMP @wait_key
 
@@ -377,9 +398,8 @@ disk_write_loop_phase1:
     DEX ; 2
     BNE disk_write_loop_phase1 ; 2/3
 
+    ; write 7 more FF40 bytes so the next write phase is synced
     LDX #$7
-
-; write 7 more FF40 bytes so the next write phase is synced
 write_ff40:
     STA ZPDUMMY ; 3
     STA PHASE1OFF ; could do it outside the loop too
@@ -387,8 +407,9 @@ write_ff40:
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
-    ; 14
+    ; 17
     JSR wait12
+    STA ZPDUMMY
     NOP
 
     DEX
@@ -426,6 +447,92 @@ wait19:
     PHA
     PLA
 wait12:
+    RTS
+
+build_nibble_tables:
+    ; clear tables
+    LDX #$00
+    LDA #$00
+@0:
+    STA DECODE_TRACK0,X
+    STA DECODE_TRACK1,X
+    STA DECODE_TRACK2,X
+    INX
+    BNE @0
+
+    ; this part is copied from the Disk II ROM
+    ; comments are from https://gswv.apple2.org.za/a2zine/GS.WorldView/Resources/DOS.3.3.ANATOMY/BOOT.PROCESS.txt
+    ; XXX more comments
+    LDX #$3
+    STX savex
+@build_table:
+    STX savex ;Save potential index seed in the zero page.
+    TXA
+    ASL
+    BIT savex ;Conditions the z-flag of the status.
+                 ;(If any bits match, z-flag=1.)
+    BEQ @next_x  ;Branch if value was illegal.
+                      ;Illegal value = z-flag=1 = no match = no
+                      ;adjacent 1's.
+    ORA savex ;Merge shifted version of seed with orig.
+    EOR #$FF     ;Take 1's compliment of shifted version to
+                      ;swap 1's for 0's and 0's for 1's.
+    AND #%01111110 ;Throw away the hi and least significant
+                      ;bits so will be testing:
+                      ;    b5,6  b4,5  b3,4  b2,3 b1,2 b0,1.
+@test_carry:
+    BCS @next_x  ;Always fall through on very first entry.
+                      ;If branch is taken, got illegal value
+                      ;because more than 1 pr of adjacent 0's.
+    LSR          ;Shift a bit into the carry (if carry set
+                      ;have at least 1 pr of adjacent 0's).
+    BNE @test_carry ;Take branch when remaining byte is not
+                      ;zero.  Got at least 1 pr of adjacent 0's.
+                      ;Go test carry to see if another pair has
+                      ;already been detected.
+    TYA          ;Store the counter that corresponds to a
+
+    SEC
+    SBC #$1F
+    STA bit6_value
+
+    STX savex
+
+    TXA
+    EOR #$80
+    TAX
+    ; X contains the disk nibble ($96..$FF with sparse values)
+
+    LDA bit6_value
+    ; A contains the 6-bit logical value we are masking
+    ASL
+    ASL
+    STA bit6_value
+    AND #$C0 ; isolate bits 5 and 4 of decoded value
+    STA DECODE_TRACK2,X
+
+    LDA bit6_value
+    ASL
+    ASL
+    STA bit6_value
+    AND #$C0 ; isolate bits 3 and 2 of decoded value
+    STA DECODE_TRACK1,X
+
+    LDA bit6_value
+    ASL
+    ASL
+    STA bit6_value
+    AND #$C0 ; isolate bits 1 and 0 of decoded value
+    STA DECODE_TRACK0,X
+
+    LDX savex
+
+    INY
+@next_x:
+    INX
+    BPL @build_table ;Keep on trying to build table until (x)
+                      ;increments to #$80.
+
     RTS
 
 done2:
@@ -469,16 +576,19 @@ prepare_read:
 
 ; 29 cycles in common case
 disk_read_loop_nopush:
-    LDA SHIFT ; 4
+    LDX SHIFT ; 4
     ; should normally fall through, will occasionally loop once when
     ; we have slipped a cycle and the nibble is not ready after 31
     ; cycles
     BPL disk_read_loop_nopush ; 2/3
 
-    ROR
-    BCC @notick ; 2/3
+decode_track_ref0:
+    LDA DECODE_TRACK0,X
+    STA ZPDUMMY
+
+    BPL @notick ; 2/3
     STA $C030 ; 4
-    BCS @next
+    BMI @next
 
 @notick:
     NOP
@@ -486,13 +596,9 @@ disk_read_loop_nopush:
     NOP
 
 @next:
-    ROL
     NOP
-
-    STA ZPDUMMY
-    ;NOP
     
-    CMP #$FF ; end of sector marker
+    CPX #$AA ; end of sector marker
     BNE disk_read_loop_nopush ; 2/3
     ; falls through when it's time to step the head
 
@@ -505,8 +611,6 @@ read_step_head_nopush:
     LDY STEP_TABLE2,X ; 4
     LDA $C000,Y ; 4 toggle next phase switch
 
-    ; 2 reset inner loop counter1
-    ; LDX #LOOP_INNER+1
     LDX #$00
 
     ; if STEP_TABLE2 == 89 then we are entering the last write sequence
@@ -518,19 +622,19 @@ read_step_head_nopush:
 
 ; 29 cycles in common case
 disk_read_loop_push:
-    LDA SHIFT ; 4
+    LDY SHIFT ; 4
     ; should normally fall through, will occasionally loop once when
     ; we have slipped a cycle and the nibble is not ready after 31
     ; cycles
     BPL disk_read_loop_push ; 2/3
 
-    ; keep same timing padding in all 3 variants
+decode_track_ref1:
+    LDA DECODE_TRACK0,Y
     PHA
-    ROR
 
-    BCC @notick ; 2/3
+    BPL @notick ; 2/3
     STA $C030 ; 4
-    BCS @next ; 3 always
+    BMI @next ; 3 always
 
 @notick:
     NOP
@@ -538,10 +642,9 @@ disk_read_loop_push:
     NOP
 
 @next:
-    ;NOP
-    INX ; 2
-    ROL
-    CMP #$FF ; end of sector marker
+    INX ; 2 count how many we are pushing
+
+    CPY #$AA ; end of sector marker
     BNE disk_read_loop_push ; 2/3
     ; falls through when it's time to step the head
 
@@ -567,11 +670,11 @@ read_step_head_push:
 disk_read_loop_pull:
     NOP
     NOP
+    NOP
 
     ; keep same timing padding in all 3 variants
     PLP
     NOP 
-    NOP
     
     BVC @notick ; 2/3
     STA $C030 ; 4
@@ -583,6 +686,8 @@ disk_read_loop_pull:
     NOP
 
 @next:
+    NOP
+
     DEX ; 2
     BNE disk_read_loop_pull ; 2/3
 
