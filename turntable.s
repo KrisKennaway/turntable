@@ -2,7 +2,7 @@
 SLOTn0 = $60 ; assumes slot 6
 
 ; how many nibbles to write before stepping head
-LOOP_INNER = 240
+LOOP_INNER = 254
 
 ; disk soft switches, pre-indexed by SLOTn0
 PHASE0OFF   = $C080+SLOTn0
@@ -30,9 +30,8 @@ WRITEBASE = $C08F
 
 ; zero page
 ; TODO: use unused addresses
-PHASE1STATE = $00 ; .. $01
 ZPDUMMY = $02
-loopctr = $03 ; .. $04
+loopctr = $03
 
 ; internal buffers
 STEP_TABLE1 = $4000
@@ -66,13 +65,28 @@ SLINKY_DATA = $C083+SLINKY_SLOTn0
 STEP_TABLE1_DATA:
 ; XXX use PHASE1OFF_BASE etc
 ; XXX constants for sentinels
+;.byte    $86, $86, $86, $86  ; X . . . ; track 0
 .byte    $86, $86, $86, $86  ; X . . . ; track 0
+
+;.byte    $81, $80, $81, $80  ; X X . . ; track 0.25
 .byte    $81, $80, $81, $80  ; X X . . ; track 0.25
+
+;.byte    $80, $80, $80, $80  ; . X . . ; track 0.5
 .byte    $80, $80, $80, $80  ; . X . . ; track 0.5
+
+;.byte    $85, $84, $85, $84  ; . X X . ; track 0.75
 .byte    $85, $84, $85, $82  ; . X X . ; track 0.75 XXX 82/84 swapped so we can use 84 as a sentinel
+
+;.byte    $82, $82, $82, $82  ; . . X . ; track 1
 .byte    $82, $82, $82, $82  ; . . X . ; track 1
+
+;.byte    $87, $87, $87, $87  ; . . X X ; track 1.25
 .byte    $87, $87, $87, $87  ; . . X X ; track 1.25
+
+;.byte    $84, $84, $84, $84  ; . . . X ; track 1.5
 .byte    $84, $84, $84, $84  ; . . . X ; track 1.5
+
+;.byte    $81, $81, $81, $81  ; X . . X ; track 1.75
 .byte    $81, $81, $81, $81  ; X . . X ; track 1.75
 
 STEP_TABLE2_DATA:
@@ -82,13 +96,29 @@ STEP_TABLE2_DATA:
 ;   which may flipping two different switches
 ; - XXX 84 is also used as a sentinel value to break out of push/pull
 ; - we make sure all of the 83 are in this table so we can filter for them in make_phase1_state_table
+
+;.byte    $86, $86, $86, $86  ; X . . . ; track 0 ;
 .byte    $86, $86, $86, $89  ; X . . . ; track 0 ; 89 is a sentinel to enter the push/pull mode when phase 1 is active
+
+;.byte    $83, $82, $83, $82  ; X X . . ; track 0.25
 .byte    $83, $82, $83, $82  ; X X . . ; track 0.25
+
+;.byte    $83, $82, $83, $82  ; . X . . ; track 0.5
 .byte    $83, $82, $83, $82  ; . X . . ; track 0.5
+
+;.byte    $83, $82, $83, $82  ; . X X . ; track 0.75 ;
 .byte    $83, $82, $83, $84  ; . X X . ; track 0.75 ; 82/84 swapped so we can use 84 as a sentinel to break out of push/pull
+
+;.byte    $85, $85, $85, $85  ; . . X . ; track 1
 .byte    $85, $85, $85, $85  ; . . X . ; track 1
-.byte    $87, $87, $87, $87  ;  . X X ; track 1.25
+
+;.byte    $87, $87, $87, $87  ; . . X X ; track 1.25
+.byte    $87, $87, $87, $87  ; . . X X ; track 1.25
+
+;.byte    $84, $84, $84, $84  ; . . . X ; track 1.5 ; ok to use the 84 sentinel because we're not in the push/pull state
 .byte    $84, $84, $84, $84  ; . . . X ; track 1.5 ; ok to use the 84 sentinel because we're not in the push/pull state
+
+;.byte    $81, $81, $81, $81  ; X . . X ; track 1.75
 .byte    $81, $81, $81, $81  ; X . . X ; track 1.75
 
 make_step_table:
@@ -131,7 +161,7 @@ make_phase1_state_table:
 
     INX
     BNE @0
-
+    
 seek_track0:
 ; Step to track 0
     LDY #$80 ; current half-track count
@@ -155,12 +185,6 @@ prepare:
     LDA PHASE1OFF
     LDA PHASE2OFF
     LDA PHASE3OFF
-
-    ; phase 1 is off to begin with
-    LDA #>(PHASE1OFF-SLOTn0)
-    STA PHASE1STATE+1
-    LDA #<(PHASE1OFF-SLOTn0)
-    STA PHASE1STATE
 
     LDA #$00
     STA loopctr
@@ -491,13 +515,11 @@ disk_read_loop_nopush:
     STA ZPDUMMY
     ;NOP
     
-    CMP #$FF
+    CMP #$FF ; end of sector marker
     BNE disk_read_loop_nopush ; 2/3
+    ; falls through when it's time to step the head
 
 read_step_head_nopush:
-    ; falls through when it's time to step the head
-    ; 29 or 30 cycles so far, need 32 to get back on 31-cycle cadence
-
     INC loopctr ; 5
     LDX loopctr ; 3
 
@@ -542,14 +564,11 @@ disk_read_loop_push:
     ;NOP
     INX ; 2
     ROL
-    CMP #$FF
+    CMP #$FF ; end of sector marker
     BNE disk_read_loop_push ; 2/3
-    ;BEQ read_step_head_push0 ; 3 always
+    ; falls through when it's time to step the head
 
 read_step_head_push:
-    ; falls through when it's time to step the head
-    ; 30 cycles so far, need 32 to get back on 31-cycle cadence
-    ;STA ZPDUMMY
     TXA
     PHA ; store how many bytes we pushed
 
@@ -561,15 +580,11 @@ read_step_head_push:
     LDY STEP_TABLE2,X ; 4
     LDA $C000,Y ; 4 toggle next phase switch
 
-    ; 2 reset inner loop counter1
-    ; LDX #LOOP_INNER+1
-
-    ;STA ZPDUMMY
-    ; fall through to disk_read_loop_pull since phase 1 will be on and we couldn't
-    ; write anything sensible
-
     PLA
     TAX
+
+    ; fall through to disk_read_loop_pull since phase 1 will be on and we couldn't
+    ; write anything sensible
 
 ; 28 cycles instead of 32 - so we know we'll finish ahead of schedule
 disk_read_loop_pull:
@@ -591,8 +606,6 @@ disk_read_loop_pull:
     NOP
 
 @next:
-    NOP
-    NOP
     DEX ; 2
     BNE disk_read_loop_pull ; 2/3
 
@@ -601,22 +614,19 @@ disk_read_loop_pull:
     LDA SHIFT ; XXX
     BPL @startsync
 @tryd5:
-    ;STA $400
     EOR #$D5
     BNE @startsync
 @tryaa:
     LDA SHIFT ; 4
     BPL @tryaa ; 2/3
-    ;STA $401
     CMP #$AB ; 2
     BNE @tryd5 ; 2/3
 
     ; XXX need to add one more padding byte at start of sector
 
-read_step_head_pull:
     ; falls through when it's time to step the head
-    ; 30 cycles so far, need 32 to get back on 31-cycle cadence
 
+read_step_head_pull:
     INC loopctr ; 5
     LDX loopctr ; 3
     LDY STEP_TABLE1,X ; 4
