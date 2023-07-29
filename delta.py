@@ -1,5 +1,3 @@
-import math
-
 import librosa
 import numpy
 import soundfile as sf
@@ -51,7 +49,7 @@ def downsample_audio(simulated_audio, original_audio, input_rate, output_rate,
 
 
 PUSH_PHASE = [
-    #False, False, False, False,
+    # False, False, False, False,
     False, False, False, True,
 
     # False, True, False, True,
@@ -120,8 +118,7 @@ class Tracks:
         ):
             # 6 bit quantity
             merged = chunk0 ^ (chunk1 << 2) + (chunk2 << 4)
-            # print(merged, chunk0, chunk1, chunk2)
-            
+
             nibbles = [self.NIBBLE_6_2[m] for m in merged]
             nibbles[-1] = 0xAA  # EOS marker
 
@@ -132,8 +129,8 @@ class Tracks:
 
         disk_chunks = []
         for i, chunk in enumerate(chunks):
-            # We drop the last 2 samples because the write process writes two dummy values
-            # after writing the data, so we need to skip over them
+            # We drop the last 2 samples because the write process writes two
+            # dummy values after writing the data, so we need to skip over them
             # TODO: handle this in the chunking instead
             chunk = chunk[:BATCH_SIZE - 2]
             push_phase = PUSH_PHASE[i % len(PUSH_PHASE)]
@@ -196,16 +193,17 @@ class Tracks:
 
 
 def main():
-    # TODO: why is playback about 20% slower?  Even if we are sometimes polling for reads, that can't slow down the drive speed.
+    # TODO: why is playback about 20% slower?  Even if we are sometimes
+    # polling for reads, that can't slow down the drive speed.
     sample_rate = int(1020400/32)
     input_audio = [
-        preprocess_audio("kris.wav", sample_rate, 0.8, 99),
-        preprocess_audio("testing.wav", sample_rate, 0.8, 99),
-        preprocess_audio("record.wav", sample_rate, 0.8, 99),
+        preprocess_audio("kris1.wav", sample_rate, 0.8, 99),
+        preprocess_audio("kris2.wav", sample_rate, 0.8, 99),
+        preprocess_audio("kris3.wav", sample_rate, 0.8, 99),
     ]
 
-    null_audio = [0] * 150*1024
-    input_audio = [null_audio, null_audio, null_audio]
+    #null_audio = [0] * 150*1024
+    #input_audio = [null_audio, null_audio, null_audio]
 
     tracks = Tracks(input_audio)
     

@@ -45,6 +45,7 @@ DECODE_TRACK2 = $4500 ; maps bits 5, 4 of decoded nibble value to bits 7, 6
 IO_BUF = $4600 ; 1K ProDOS I/O buffer
 DATA_BUF = $4a00
 
+HOME = $FC58
 WAIT = $FCA8
 BELL = $FF3A
 
@@ -58,8 +59,19 @@ SLINKY_ADDRM = $C081+SLINKY_SLOTn0
 SLINKY_ADDRH = $C082+SLINKY_SLOTn0
 SLINKY_DATA = $C083+SLINKY_SLOTn0
 
-.proc main
 
+.proc main
+    JSR HOME
+    CLC
+    LDX #$c
+@0:
+    LDA banner,X
+    ADC #$80
+    STA $535,X
+    DEX
+    BPL @0
+
+@done:
     JMP make_step_table
 
 ; STEP_TABLE: (entries have SLOTn0 added)
@@ -205,7 +217,7 @@ prepare:
     ; check 1..3
     CMP #$b1 ; '1'
     BCC @check_write
-    CMP #$b4; '4'
+    CMP #$b4 ; '4'
     BCS @check_write
 
     ; patch up track decode table references
@@ -377,10 +389,12 @@ write_prepare_phase1:
     NOP
 
 disk_write_loop_phase1:
+    NOP
+    NOP
+    NOP
+    ;BIT $C000
+    ;BMI restart
     ;8
-    NOP
-    NOP
-    NOP
     NOP
     
     ; write the data
@@ -448,6 +462,9 @@ wait19:
     PLA
 wait12:
     RTS
+
+restart:
+    JMP seek_track0
 
 build_nibble_tables:
     ; clear tables
@@ -542,6 +559,15 @@ done2:
 prepare_read:
     LDA READ
 
+;    LDX #$FF
+;    TXS
+;    INX
+;    LDA #$00
+;@zero_stack:
+;    STA $100,X
+;    INX
+;    BNE @zero_stack
+
     LDY #$60 ; XXX
     ; read 5 sync bytes
 @loop:
@@ -598,9 +624,9 @@ decode_track_ref0:
     ;NOP
 
 @next:
-    ;NOP
+    ; NOP
     
-    INX ; 2 count how many we are pushing
+    INX ; 2 count how many we have read
     BEQ read_step_head_nopush ; in case we overflow
 
     CPY #$AA ; end of sector marker
@@ -675,7 +701,7 @@ read_step_head_push:
 ; 28 cycles instead of 32 - so we know we'll finish ahead of schedule
 disk_read_loop_pull:
     BIT $C000
-    BMI restart
+    BMI restart1
 
     ; keep same timing padding in all 3 variants
     PLP
@@ -734,7 +760,7 @@ done:
     STA MOTOROFF
     BRK
 
-restart:
+restart1:
     JMP seek_track0
 
 load_slinky:
@@ -774,42 +800,42 @@ load_slinky:
 
     BCC @read_block
 
-    JMP @play
+    RTS
 @error:
     BRK
 
-@play:
-    LDA #$00
-    STA SLINKY_ADDRL
-    STA SLINKY_ADDRM
-    STA SLINKY_ADDRH
-
-playback:
-    LDA SLINKY_DATA
-    ROR
-
-    BCC @notick ; 2/3
-    STA $C030 ; 4
-    BCS @next ; 3 always
-
-@notick:
-    ; 3+6 = 9
-    NOP
-    NOP
-    NOP
-
-@next:
-    STA $401
-    ; end playback on keypress
-    BIT $C000
-    BMI @done
-    NOP
-    NOP
-    JMP playback
-
-@done:
-    BIT $C010
-    RTS
+;@play:
+;    LDA #$00
+;    STA SLINKY_ADDRL
+;    STA SLINKY_ADDRM
+;    STA SLINKY_ADDRH
+;
+;playback:
+;    LDA SLINKY_DATA
+;    ROR
+;
+;    BCC @notick ; 2/3
+;    STA $C030 ; 4
+;    BCS @next ; 3 always
+;
+;@notick:
+;    ; 3+6 = 9
+;    NOP
+;    NOP
+;    NOP
+;
+;@next:
+;    STA $401
+;    ; end playback on keypress
+;    BIT $C000
+;    BMI @done
+;    NOP
+;    NOP
+;    JMP playback
+;
+;@done:
+;    BIT $C010
+;    RTS
 
 open_cmdlist:
     .byte $03 ; param_count
@@ -829,5 +855,8 @@ read_refnum:
     .addr DATA_BUF
     .word $0100 ; request_count
     .word $0000 ; transfer_count
+
+banner:
+    .asciiz "( TurnT@ble )"
 
 .endproc
