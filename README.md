@@ -2,6 +2,8 @@
 
 Streaming audio from a 5.25" floppy disk on an Apple II.
 
+See a [video](https://youtu.be/fVxKRcKgGSk) of it in action (with [bonus cat video](https://youtu.be/gevCDf6dwvQ))
+
 ## Background
 
 The Disk II and Apple II speaker are both exposed to the CPU as very low level hardware interfaces.
@@ -27,6 +29,8 @@ That makes this project (even more) impractical, because not only do you need to
 Let's agree to gloss over the silliness of reading audio data into memory, only to write it to disk and play back a lower quality version.  The aim of this project was to see what could be done, ignoring what is actually practical or useful :-)
 
 At the time I started this project no emulators supported the terrible things I was doing to disk layout. Virtual II came close but has a bug with .woz track alignment when skewing across tracks. OpenEmulator and MAME refused to even write out a .woz image. KEGS has apparently fixed support for this after I discussed the project with Kent Dickey, but I haven't tested this yet.
+
+Having said that, the disk image is included in this repo if you do want to try it.
 
 # Technical details
 
@@ -93,15 +97,17 @@ Effectively what I ended up with is a single continuous track that spans the who
 - 21 sectors of 256 bytes each which are contiguous on the spiral
 - 5 sectors of 256 bytes separated by 6 equal sized gaps.  The gaps correspond to the periods when phase 1 is active in order to step the head through the 0.25..0.75 track region.
 
-Here's an image of the resulting disk structure.
+Altogether, this stores about 120KB on the disk, which is enough for about 4.5 seconds of audio playback.
+
+Here's an image of the resulting structure for the encoded audio disk:
 
 ![Spiral track with 256-byte sectors and encoded audio](images/turntable.png)
 
-This one uses shorter sectors (190 bytes) and does not encode audio data so the spiral structure is clearer.
+The flux image of this audio track is [here](https://www.dropbox.com/scl/fi/3t41jesdf5a8qyg5kqwea/turntable.a2r.bz2?rlkey=9twv33jbixluntb108fqvuhdk&dl=0)
+
+This one uses shorter sectors (190 bytes) and does not encode audio data so the spiral structure is clearer:
 
 ![Spiral track with 190-byte sectors](images/spiral-190.png)
-
-Altogether, this stores about 120KB on the disk, which is enough for about 4.5 seconds of audio playback.
 
 ## Resynchronizing after phase 1
 
