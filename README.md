@@ -1,6 +1,6 @@
 # Turntable: the world's crappiest record player
 
-Streaming audio from a 5.25" floppy.
+Streaming audio from a 5.25" floppy disk on an Apple II.
 
 ## Background
 
@@ -8,9 +8,13 @@ The Disk II and Apple II speaker are both exposed to the CPU as very low level h
 
 - Producing recognizable speaker audio requires toggling the speaker at precise timing intervals.
 
-- Reading/writing a byte from the Disk, and controlling the positioning of the read/write head, also require precise CPU timing.
+- Reading/writing a byte from the Disk II, and controlling the positioning of the read/write head, also require precise CPU timing.
 
 Can we do all 3 at the same time?  Yes we can!  Barely.
+
+## Why?
+
+This project was done as a "slackfest" entry during KansasFest 2023.  I'd had the idea kicking around in my head for a few years previously as something that seemed like it should be on the edge of possible, which is the kind of technical challenge I enjoy about the Apple II.  I also wanted to learn how the Disk II hardware worked at a more basic level, which is the other kind of technical challenge I enjoy.
 
 ## Requirements
 
@@ -40,11 +44,11 @@ To do better, we need to seek the head *while* reading (there's already an audio
 
 If we can cause the head to trace a continuous spiral, while reading data, and toggling the speaker...then we are done (Well, almost - we also need to figure out how to get data onto the disk in the necessary format).
 
-Like I/O, head positioning also requires low level software control.  The Disk II hardware exposes 4 magnets (called "phase 0 ..3") which can be enabled and disabled under software control.  Actuating them in sequence causes the head to be attracted and "dragged" in the inward or outward radial directions.
+Like I/O, head positioning also requires low level software control.  The Disk II hardware exposes 4 magnets (called "phase 0 .. 3") which can be enabled and disabled under software control.  Actuating them in sequence causes the head to be attracted and "dragged" in the inward or outward radial directions while the disk spins.
 
 Each phase corresponds to a half-track positioning in the usual disk layout scheme.  e.g. assuming the head is positioned at track 0, activating phase 0 will leave it there; activating phase 1 will move it to the track 0.5 position, etc.  Activating both 0 and 1 will move to the track 0.25 position, etc.
 
-Since the head is a physical object, it takes time to move, and we need to make sure to leave the magnets energized for long enough for it to settle.  Driving them too quickly and the head will be left behind.
+Since the head is a physical object, it takes time to move, and we need to make sure to leave the magnets energized for long enough for it to settle.  Drive them too quickly and the head will be left behind.
 
 In order to read or write in a continuous spiral, we can do the following:
 
@@ -54,7 +58,9 @@ In order to read or write in a continuous spiral, we can do the following:
 
 How much data?  The disk spins at roughly 300rpm, or 0.2 sec/revolution.  If we are writing data every 32us, that means at most 6250 writes/revolution.  But in this time we also need to step the head inward by at least 1 track, so that the next layer of the spiral doesn't overwrite the previous.  i.e. we need to perform 4 successive phase actuations to step from N, N + 0.25, N + 0.5, N + 0.75 and arrive at N + 1.
 
-That means that at most every 1562 writes, we need to be enabling/disabling new phases.  That's a difficult number for an 8-bit computer to count up to, but we can break it down as 8x190 = 1560 writes, e.g. writing in batches of 190 bytes and repeating each 8 times before changing the stepper phases.  In practice though we can only go as high as 4x256 = 1024 bytes (the reason for this isn't entirely clear and might be a bug - e.g. even using 8x128 gives garbled playback, and imaging the disk in applesauce doesn't decode some of the sectors properly)
+That means that at most every 1562 writes, we need to be enabling/disabling new phases.  That's a difficult number for an 8-bit computer to count up to, but we can break it down as 8x190 = 1560 writes, e.g. writing in batches of 190 bytes and repeating each 8 times before changing the stepper phases.
+
+In practice though we can only go as high as 4x256 = 1024 bytes (the reason for this isn't entirely clear and might be a bug - e.g. even using 8x128 gives garbled playback, and imaging the disk in applesauce doesn't decode some of the sectors properly)
 
 It turns out that only a single phase enable/disable is needed for each such batch:
 
@@ -75,19 +81,19 @@ Doing this, we track the head in a continuous spiral across the entire disk, and
 
 The Disk II hardware disables writes when phase 1 is active.  I'm not sure anyone really knows why this is.  That means that you can't actually write in a continuous spiral.
 
-The first thing I tried was disabling and restoring phase 1 during part of each 32-cycle write sequence.  This does allow some data to be written but 3-4 of the bits will always be zero (which in turn means that the Disk II will read back the data unpredictably).  Exactly which bits depends on timing but in principle it could be possible to still get a valid data stream if you are careful and/or lucky with timing.
+The first thing I tried was disabling and restoring phase 1 during part of each 32-cycle write sequence.  This does allow some data to be written but 3-4 of the bits will always be zero (which in turn means that the Disk II will read back the data unpredictably, because the hardware can only reliably deal with at most two consecutive 0 bits before returning noise).  Exactly which bits depends on timing, but in principle it could be possible to still get a valid data stream if you are careful and/or lucky with timing.
 
-Instead I switched to a different approach: alternating phase 1 on and off for subsequent batches of nibble writes.  In principle that loses some tracking stability since we begin stepping the head under magnet control, then disable all the magnets and rely on inertia to keep it moving for a bit while we write another batch, then re-enable the magnets again.  In practice it seems to be ok on my drive.
+Instead I switched to a different approach: alternating phase 1 on and off for subsequent batches of nibble writes.  In principle that loses some tracking stability since we begin stepping the head under magnet control, then disable all the magnets and rely on inertia to keep it moving for a bit while we write another batch, then re-enable the magnets again to resume active control.  In practice it seems to be ok on my drive.
 
-The challenge with this approach is that since we're not writing any data during phase 1, we need some way to keep reading it so we can toggle the speaker at appropriate intervals.  To solve this, we can prepare for an upcoming phase 1 write gap during the previous write batch, by pushing data onto the stack (and toggling the speaker as usual).  Then, during the phase 1 write gap we can pull from the stack and use a different bit to determine whether to toggle the speaker.
+The challenge with this approach is that even though we're not writing any data during phase 1, we still need some way to keep reading it so we can toggle the speaker at appropriate intervals.  To solve this, we can prepare for an upcoming phase 1 write gap during the previous write batch, by pushing data onto the stack (and toggling the speaker as usual).  Then, during the phase 1 write gap we can pull from the stack and use a different data bit to determine whether to toggle the speaker.
 
 This requires a small bit of preprocessing to prepare the audio data for recording.  We basically fold the data that would be played during the phase 1 write gap back onto the previous batch - since we're using the stack to buffer it, it's encoded in reverse order.
 
 Effectively what I ended up with is a single continuous track that spans the whole disk in a spiral, which is broken up into sectors with variable spacing:
 - 21 sectors of 256 bytes each which are contiguous on the spiral
-- 5 sectors of 256 bytes separated by 6 equal sized gaps.  The gaps correspond to the periods when phase 1 is active to step the head through the 0.25..0.75 track region.
+- 5 sectors of 256 bytes separated by 6 equal sized gaps.  The gaps correspond to the periods when phase 1 is active in order to step the head through the 0.25..0.75 track region.
 
-Altogether, this stores about 140KB on the disk, which is enough for about 4.8 seconds of audio playback.
+Altogether, this stores about 120KB on the disk, which is enough for about 4.5 seconds of audio playback.
 
 ## Resynchronizing after phase 1
 
@@ -103,21 +109,23 @@ Initially I tried reading every 31 (or 32) cycles, with a loop in case it was no
 
 ```
 @read:
+    ; 6 cycles in the typical case
     LDA SHIFT,Y
     BPL read ; not yet ready
+    ; 25 more cycles before next read, in which to toggle speaker and loop
 ```
 
-I couldn't get this to work reliably without losing reads.  When a nibble is ready to read (high bit set), it only remains readable for a few cycles (~8 is typical).  That's long enough for that polling loop to catch it if you don't poll too infrequently.  On paper the timings should work here but I could show I was losing data - e.g. by inserting a check byte at the end of the batch and verifying that I was seeing it after some smaller than expected number of reads.  It's possible this could be made to work with some more careful timing analysis about the possible interactions between Apple II and Disk II timings.
+I couldn't get this to work reliably without losing reads.  When a nibble is ready to read (high bit set), it only remains readable for a few cycles (~8 is typical).  That's long enough for that 7-cycle polling loop to catch it if you don't poll too infrequently.  On paper the timings should work here but I could show I was losing data - e.g. by inserting a check byte at the end of the batch and verifying that I was seeing it after some smaller than expected number of reads.  It's possible this could be made to work with some more careful timing analysis about the possible interactions between Apple II and Disk II timings.
 
 Instead I switched to another approach: instead of trying to read a fixed number of nibbles under precise timing control, to relax the timing control (i.e. use a tighter polling loop) and read until I see an "end of sector" marker.
 
-Emulation might produce more deterministic results, although at the time I started this project no emulators supported the terrible things I was doing to disk layout.
+Emulation might produce more deterministic results, although at the time I started this project no emulators correctly supported these "spiral writes".
 
-The astute reader might notice that at 32 cycles per audio sample, 140KB of data should only produce about 4.4 seconds of audio, not 4.8.  For some reason audio playback is about 10-20% slower than it should be, which I can't account for yet.  Even accounting for the nondeterministic read timing, the disk rotation speed is fixed.  If we end up having to poll for a read, that might cause us to miss data but it can't slow down the overall playback.  I'm not sure what is going on here.
+The astute reader might notice that at 32 cycles per audio sample, 120KB of data should only produce about 3.8 seconds of audio, not 4.5.  For some reason audio playback is about 10-20% slower than it should be, which I can't account for yet.  Even accounting for the nondeterministic read timing, the disk rotation speed is fixed.  If we end up having to poll for a read, that might cause us to miss data but it can't slow down the overall playback.  I'm not sure what is going on here - my best guess is that sometimes we are losing tracking control of the spiral and adding an extra 0.2s rotation to resynchronize.
 
 ## Multiple audio tracks
 
-The Disk II hardware (with DOS 3.3 PROMs) is able to write out 66 unique "nibble" values (due to hardware constraints that no more than two consecutive bits may be 0).  This is 6 bits that can be used for data, with 2 left over for signaling.
+The Disk II hardware (with DOS 3.3 PROM) is able to read and write 66 unique "nibble" values to disk (due to hardware constraints that no more than two consecutive bits may be 0).  This is 6 bits that can be used for data, with 2 left over for signaling.
 
 Since our scheme for dealing with phase 1 writes requires 2 bits, that means we can encode 3 audio tracks on a single disk track.  Each track gets 2 bits (track 0: 0,1; track 1: 2,3; track 2: 4,5).  We precompute lookup tables that map the disk nibble to one of these pairs of bits (shifted into bit positions 6 and 7 so we can efficiently test them during reads, by conditioning the N and V flags)
 
@@ -125,7 +133,9 @@ Audio tracks can be selected by pressing 1 .. 3.
 
 ## Writing data
 
-In order to produce a disk image suitable for playback we need to somehow get the audio data onto disk.  One challenge is that it's more data than can fit in memory (~140K).  The other challenge is that even if we restrict to what could fit in main memory, we don't have enough CPU cycles to step through it during the (32 cycle) write window.  To work around this, I cheated by preloading it into a RamFactor ("Slinky"-style) memory card.  This has the feature that I/O to the memory card is via repeatedly accessing a single memory location, which makes it ideal for this purpose: fetching the next byte to be written takes 4 cycles and easily fits within the cycle budget.
+In order to produce a disk image suitable for playback we need to somehow get the audio data onto disk.  One challenge is that it's more data than can fit in main memory (~120K).  The other challenge is that even if we restrict to what could fit in main memory, we don't have enough CPU cycles to step through it during the (32 cycle) write window (the required 16-bit pointer increments take more cycles than we can spare).
+
+To work around this, I cheated by preloading it into a RamFactor ("Slinky"-style) memory card.  This has the feature that I/O to the memory card is via repeatedly accessing a single memory location, which makes it ideal for this purpose: fetching the next byte to be written takes 4 cycles and easily fits within the cycle budget.
 
 It might be theoretically possible to produce a working disk image externally, e.g. writing it using an AppleSauce.  In practice this would not be straightforward, and it would probably require careful tuning of the image to match the timing of a particular drive (or vice versa).  Writing a disk image from memory has the advantage that the same drive is used to write and read, so it should be already adapted for the exact drive speed.
 
