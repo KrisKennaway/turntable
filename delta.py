@@ -49,28 +49,13 @@ def downsample_audio(simulated_audio, original_audio, input_rate, output_rate,
 
 
 PUSH_PHASE = [
-    # False, False, False, False,
     False, False, False, True,
-
-    # False, True, False, True,
     False, True, False, True,
-
-    # False, True, False, True,
     False, True, False, True,
-
-    # False, True, False, True,
     False, True, False, False,
-
-    # False, False, False, False,
     False, False, False, False,
-
-    # False, False, False, False,
     False, False, False, False,
-
-    # False, False, False, False,
     False, False, False, False,
-
-    # False, False, False, False,
     False, False, False, False
 ]
 
