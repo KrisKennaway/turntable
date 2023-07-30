@@ -197,9 +197,9 @@ def main():
     # polling for reads, that can't slow down the drive speed.
     sample_rate = int(1020400/32)
     input_audio = [
-        preprocess_audio("kris1.wav", sample_rate, 0.8, 99),
-        preprocess_audio("kris2.wav", sample_rate, 0.8, 99),
-        preprocess_audio("kris3.wav", sample_rate, 0.8, 99),
+        preprocess_audio("kris/kris1.wav", sample_rate, 0.8, 99),
+        preprocess_audio("kris/kris2.wav", sample_rate, 0.8, 99),
+        preprocess_audio("kris/kris3.wav", sample_rate, 0.8, 99),
     ]
 
     #null_audio = [0] * 150*1024
