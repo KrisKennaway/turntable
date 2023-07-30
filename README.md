@@ -1,28 +1,32 @@
 # Turntable: the world's crappiest record player
 
+Streaming audio from a 5.25" floppy.
+
 ## Background
 
 The Disk II and Apple II speaker are both exposed to the CPU as very low level hardware interfaces.
 
-Producing recognizable speaker audio requires toggling the speaker at precise timing intervals.
+- Producing recognizable speaker audio requires toggling the speaker at precise timing intervals.
 
-Reading/writing a byte from the Disk, and controlling the positioning of the read/write head, also require precise CPU timing.
+- Reading/writing a byte from the Disk, and controlling the positioning of the read/write head, also require precise CPU timing.
 
-Can we do all 3 at the same time?  Yes we can!
+Can we do all 3 at the same time?  Yes we can!  Barely.
 
 ## Requirements
 
 Apart from the technical challenges of playing back audio from a 5.25" floppy disk, we also need to get data onto disk in the first place.
 
-As discussed below, I cheat by using a RamFactor ("Slinky"-style) memory card to pre-stage the data, since this allows efficient reading from memory while writing the data stream.
+As discussed below, I cheat by using a RamFactor ("Slinky"-style) memory card to pre-stage the data, since this allows efficient reading from memory while writing the data stream to disk.
 
-That makes this project (even more) impractical, because not only do you need to have this (relatively uncommon) Apple II hardware in order to prepare a disk image, if you have one then you can already stream audio at a much higher quality by preloading it into the memory card.
+That makes this project (even more) impractical, because not only do you need to have this (relatively uncommon) Apple II hardware in order to prepare a disk image, if you have one then you can already stream audio for longer and at a much higher quality by preloading it into the memory card.
 
 Let's agree to gloss over the silliness of reading audio data into memory, only to write it to disk and play back a lower quality version.  The aim of this project was to see what could be done, ignoring what is actually practical or useful :-)
 
+At the time I started this project no emulators supported the terrible things I was doing to disk layout. Virtual II came close but has a bug with .woz track alignment when skewing across tracks. OpenEmulator and MAME refused to even write out a .woz image. KEGS has apparently fixed support for this after I discussed the project with Kent Dickey, but I haven't tested this yet.
+
 # Technical details
 
-## Spiral data
+## Disk II I/O
 
 One feature of the Disk II interface is that when reading data from disk, the disk rotates at a constant speed, and the Apple II is presented with a continuous stream of bytes based on decoding the magnetic flux under the drive head at that moment.  So in principle that should allow us to produce audio: test whether a bit is set or unset in the current byte read from disk, and either toggle the speaker or don't.
 
@@ -31,6 +35,8 @@ The disk rotates at 300RPM, or 0.2 seconds/revolution.  So, for a fixed head pos
 If we want to do better, we need to seek the disk head.  If we read a track at a time and then seek, we'd have choppy audio - seeking tracks normally takes a few 10s of ms.
 
 To do better, we need to seek the head *while* reading (there's already an audio device out there that does exactly this: a record player).
+
+## Spiral data
 
 If we can cause the head to trace a continuous spiral, while reading data, and toggling the speaker...then we are done (Well, almost - we also need to figure out how to get data onto the disk in the necessary format).
 
@@ -105,21 +111,21 @@ I couldn't get this to work reliably without losing reads.  When a nibble is rea
 
 Instead I switched to another approach: instead of trying to read a fixed number of nibbles under precise timing control, to relax the timing control (i.e. use a tighter polling loop) and read until I see an "end of sector" marker.
 
-Emulation might produce more deterministic results, although at the time I started this project no emulators supported the terrible things I was doing to disk layout.  Virtual II came close but has a bug with .woz track alignment when skewing across tracks.  OpenEmulator and MAME refused to even write out a .woz image.  KEGS has apparently fixed support for this after I discussed the project with Kent Dickey, but I haven't tested this yet.
+Emulation might produce more deterministic results, although at the time I started this project no emulators supported the terrible things I was doing to disk layout.
 
 The astute reader might notice that at 32 cycles per audio sample, 140KB of data should only produce about 4.4 seconds of audio, not 4.8.  For some reason audio playback is about 10-20% slower than it should be, which I can't account for yet.  Even accounting for the nondeterministic read timing, the disk rotation speed is fixed.  If we end up having to poll for a read, that might cause us to miss data but it can't slow down the overall playback.  I'm not sure what is going on here.
 
-## Multiple tracks
+## Multiple audio tracks
 
 The Disk II hardware (with DOS 3.3 PROMs) is able to write out 66 unique "nibble" values (due to hardware constraints that no more than two consecutive bits may be 0).  This is 6 bits that can be used for data, with 2 left over for signaling.
 
-Since our scheme for dealing with phase 1 writes requires 2 bits, that means we can encode 3 audio tracks on a single disk.  Each track gets 2 bits (track 0: 0,1; track 1: 2,3; track 2: 4,5).  We precompute lookup tables that map the disk nibble to one of these pairs of bits (shifted into bit positions 6 and 7 so we can efficiently test them during reads, by conditioning the N and V flags)
+Since our scheme for dealing with phase 1 writes requires 2 bits, that means we can encode 3 audio tracks on a single disk track.  Each track gets 2 bits (track 0: 0,1; track 1: 2,3; track 2: 4,5).  We precompute lookup tables that map the disk nibble to one of these pairs of bits (shifted into bit positions 6 and 7 so we can efficiently test them during reads, by conditioning the N and V flags)
 
-Tracks can be selected by pressing 1 .. 3.
+Audio tracks can be selected by pressing 1 .. 3.
 
 ## Writing data
 
-In order to produce a disk image suitable for playback we need to somehow get the audio data onto disk.  One challenge is that it's more data than can fit in memory (~0K).  The other challenge is that even if we restrict to what could fit in memory, we don't have enough CPU cycles to step through it during the (32 cycle) write window.  To work around this, I cheated by preloading it into a slinky memory card.  This has the feature that I/O to the memory card is via repeatedly accessing a single memory location, which makes it ideal for this purpose: fetching the next byte to be written takes 4 cycles and easily fits within the cycle budget.
+In order to produce a disk image suitable for playback we need to somehow get the audio data onto disk.  One challenge is that it's more data than can fit in memory (~140K).  The other challenge is that even if we restrict to what could fit in main memory, we don't have enough CPU cycles to step through it during the (32 cycle) write window.  To work around this, I cheated by preloading it into a RamFactor ("Slinky"-style) memory card.  This has the feature that I/O to the memory card is via repeatedly accessing a single memory location, which makes it ideal for this purpose: fetching the next byte to be written takes 4 cycles and easily fits within the cycle budget.
 
 It might be theoretically possible to produce a working disk image externally, e.g. writing it using an AppleSauce.  In practice this would not be straightforward, and it would probably require careful tuning of the image to match the timing of a particular drive (or vice versa).  Writing a disk image from memory has the advantage that the same drive is used to write and read, so it should be already adapted for the exact drive speed.
 
@@ -129,7 +135,7 @@ It might be theoretically possible to produce a working disk image externally, e
 
 Honestly, audio quality is not great, and it's also pretty unstable.  It's possible there are some tweaks to improve this.  A more careful timing analysis of how the Disk II reads may (de)synchronize with CPU cycle counting could reduce the audio "jitter" coming from the need to poll for valid read data.  
 
-The other big limiting factor seems to be tracking.  The Disk II was never intended to read and write while moving, and we have barely enough control to get it to track our spiral path.  Since we're swinging a physical object around using magnets there is probably a lot of variation in how well it actually tracks, which could lead to both mis-read data (if we're tracking slightly off-center from the track) and timing variations (e.g. causing us to to overshoot or undershoot a sector).
+The other big limiting factor seems to be head tracking of our spiral track.  The Disk II was never intended to read and write while moving, and we have barely enough control to get it to track our spiral path with passable accuracy.  Since we're swinging a physical object around using magnets there is probably a lot of variation in how consistently it actually tracks, which could lead to both mis-read data (if we're tracking slightly off-center from the track) and timing variations (e.g. causing us to to overshoot or undershoot a sector).  I think these are the causes of most of the audio glitches that occur during playback.
 
 It's also likely there are some off-by-one bugs in the data framing causing a missed/extra audio sample or two, but those are probably minor in comparison to the above.
 
