@@ -93,6 +93,14 @@ Effectively what I ended up with is a single continuous track that spans the who
 - 21 sectors of 256 bytes each which are contiguous on the spiral
 - 5 sectors of 256 bytes separated by 6 equal sized gaps.  The gaps correspond to the periods when phase 1 is active in order to step the head through the 0.25..0.75 track region.
 
+Here's an image of the resulting disk structure.
+
+![Spiral track with 256-byte sectors and encoded audio](images/turntable.png)
+
+This one uses shorter sectors (190 bytes) and does not encode audio data so the spiral structure is clearer.
+
+![Spiral track with 190-byte sectors](images/spiral-190.png)
+
 Altogether, this stores about 120KB on the disk, which is enough for about 4.5 seconds of audio playback.
 
 ## Resynchronizing after phase 1
