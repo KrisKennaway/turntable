@@ -74,13 +74,14 @@ SLINKY_DATA = $C083+SLINKY_SLOTn0
 @done:
     JMP make_step_table
 
-STEP_TABLE1_DATA:
+; Sequence of soft switches needed to move the head between tracks.
 ; TODO: use PHASE1OFF_BASE etc
 ; TODO: constants for sentinels
+STEP_TABLE1_DATA:
 .byte    $86, $86, $86, $86  ; X . . . ; track 0
 .byte    $81, $80, $81, $80  ; X X . . ; track 0.25
 .byte    $80, $80, $80, $80  ; . X . . ; track 0.5
-.byte    $85, $84, $85, $82  ; . X X . ; track 0.75 XXX 82/84 swapped so we can use 84 as a sentinel
+.byte    $85, $84, $85, $82  ; . X X . ; track 0.75 ; 82/84 swapped so we can use 84 as a sentinel to break out of push/pull
 .byte    $82, $82, $82, $82  ; . . X . ; track 1
 .byte    $87, $87, $87, $87  ; . . X X ; track 1.25
 .byte    $84, $84, $84, $84  ; . . . X ; track 1.5
@@ -310,7 +311,7 @@ disk_write_loop:
     LDA SLINKY_DATA ; 4 byte to write
 
     ; write the data
-    LDY #$60 ; 2 XXX try to keep invariant
+    LDY #$60 ; 2
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
@@ -360,7 +361,8 @@ write_step_head:
     STA LOADBASE,X ; 5
     CMP SHIFTBASE,X ; 4
 
-    LDA PHASE1STATE_TABLE,Y ; 4 ; XXX
+    ; are we about to enable phase 1?
+    LDA PHASE1STATE_TABLE,Y ; 4
     BNE write_prepare_phase1
     NOP
     
@@ -382,9 +384,8 @@ disk_write_loop_phase1:
     ;8
     NOP
     
-    ; write the data
-    LDY #$60 ; 2 XXX try to keep invariant
-    ; XXX no actual need to write here because phase 1 is on
+    LDY #$60 ; 2
+    ; TODO: no actual need to write here because phase 1 is on
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
@@ -397,7 +398,7 @@ disk_write_loop_phase1:
     DEX ; 2
     BNE disk_write_loop_phase1 ; 2/3
 
-    ; write 7 more FF40 bytes so the next write phase is synced
+    ; write 7 more FF40 bytes so the Disk II can resync to the next sector once writes begin again
     LDX #$7
 write_ff40:
     STA ZPDUMMY ; 3
@@ -420,7 +421,7 @@ write_ff40:
     PLA
 
     ; one more FF40
-    ; XXX roll this up
+    ; TODO: roll this up into the previous loop
     STA LOADBASE,Y ; 5
     CMP SHIFTBASE,Y ; 4
 
@@ -439,6 +440,7 @@ write_nibble9:
     ORA SHIFTBASE,Y ; 4
     RTS ; 6
 
+; Space-efficient time-wasting
 wait26:
     PHA
     PLA
@@ -451,8 +453,10 @@ wait12:
 restart:
     JMP seek_track0
 
+; Construct tables that let us efficiently decode disk nibbles to pairs of bits in the 6-bit decoded
+; representation, which lets us implement 3 audio tracks per disk
 build_nibble_tables:
-    ; clear tables
+    ; clear tables since we're only writing sparse values
     LDX #$00
     LDA #$00
 @0:
@@ -462,51 +466,89 @@ build_nibble_tables:
     INX
     BNE @0
 
-    ; this part is copied from the Disk II ROM
+
+    ; This part is copied from the Disk II ROM
+    ;
     ; comments are from https://gswv.apple2.org.za/a2zine/GS.WorldView/Resources/DOS.3.3.ANATOMY/BOOT.PROCESS.txt
-    ; XXX more comments
-    LDX #$3
-    STX savex
+    ;
+    ; We construct the table by sequentially
+    ; incrementing (x) and testing it to see
+    ; if it meets the folowing criteria of a
+    ; disk byte:
+    ;   (1) it must have at least one pair of
+    ;       adjacent 1's in bits 0 to 6.
+    ;   (2) it must not have more than one pair
+    ;       of adjacent 0's in bits 0 to 6.
+    ; (Note that we use the x-value to represent
+    ; only the lower seven bits of a disk byte
+    ; because all disk bytes are negative.)
+    LDY #$00
+    LDX #$3 ; Starting value for candidate valid nibble
 @build_table:
-    STX savex ;Save potential index seed in the zero page.
+    STX savex
+    ; Transfer (x) to (a) and test to see if it
+    ; meets the following disk byte criteria:
+    ;  (1) has at least one pair of adjacent 1's
+    ;      in bits 0 to 6.
+    ;  (2) has no more than one pair of adjacent
+    ;      0's in bits 0 to 6.
+
+    ; Test for adjacent 1's.
+    ;
+    ; Note:  by comparing a shifted version of
+    ; the seed (in accumulator) with the original
+    ; version of the seed (in BT0SCRTH, $3C) we are
+    ; actually testing adjacent bits as shown below:
+    ;        Shifted:  b6   b5   b4   b3   b2   b1  b0   0
+    ;        Orignal:  b7   b6   b5   b4   b3   b2  b1  b0
+    ;                  -----------------------------------
+    ;        Testing: b6,7 b5,6 b4,5 b3,4 b2,3 b1,2 b0,1 -
     TXA
     ASL
-    BIT savex ;Conditions the z-flag of the status.
-                 ;(If any bits match, z-flag=1.)
-    BEQ @next_x  ;Branch if value was illegal.
-                      ;Illegal value = z-flag=1 = no match = no
-                      ;adjacent 1's.
-    ORA savex ;Merge shifted version of seed with orig.
-    EOR #$FF     ;Take 1's compliment of shifted version to
-                      ;swap 1's for 0's and 0's for 1's.
-    AND #%01111110 ;Throw away the hi and least significant
-                      ;bits so will be testing:
-                      ;    b5,6  b4,5  b3,4  b2,3 b1,2 b0,1.
+    BIT savex ; Conditions the z-flag of the status.
+              ; (If any bits match, z-flag=1.)
+    BEQ @next_x  ; Branch if value was illegal.
+                 ; Illegal value = z-flag=1 = no match = no
+                 ; adjacent 1's.
+    ORA savex ; Merge shifted version of seed with orig.
+    EOR #$FF  ;Take 1's compliment of shifted version to
+              ;swap 1's for 0's and 0's for 1's.
+    AND #%01111110 ; Throw away the hi and least significant
+                   ; bits so will be testing:
+                   ;    b5,6  b4,5  b3,4  b2,3 b1,2 b0,1.
 @test_carry:
-    BCS @next_x  ;Always fall through on very first entry.
-                      ;If branch is taken, got illegal value
-                      ;because more than 1 pr of adjacent 0's.
-    LSR          ;Shift a bit into the carry (if carry set
-                      ;have at least 1 pr of adjacent 0's).
-    BNE @test_carry ;Take branch when remaining byte is not
-                      ;zero.  Got at least 1 pr of adjacent 0's.
-                      ;Go test carry to see if another pair has
-                      ;already been detected.
-    TYA          ;Store the counter that corresponds to a
+    BCS @next_x ; Always fall through on very first entry.
+                ; If branch is taken, got illegal value
+                ; because more than 1 pr of adjacent 0's.
+    LSR         ; Shift a bit into the carry (if carry set
+                ; have at least 1 pr of adjacent 0's).
+    BNE @test_carry ; Take branch when remaining byte is not
+                    ; zero.  Got at least 1 pr of adjacent 0's.
+                    ; Go test carry to see if another pair has
+                    ; already been detected.
+    TYA ; Store the counter that corresponds to a
 
+    ; Now shift A to the 6-bit value 0..3F that the nibble
+    ; will decode to
     SEC
     SBC #$1F
     STA bit6_value
 
+    ; save a copy so we can restore it for the next loop iteration
     STX savex
 
+    ; add #$80 to X to match the nibble value we'll see from disk
+    ; X contains the disk nibble ($96..$FF with sparse values)
     TXA
     EOR #$80
     TAX
-    ; X contains the disk nibble ($96..$FF with sparse values)
+
+    ; Now isolate neighbouring pairs of bits in the 6-bit decoded value,
+    ; and shift them into bits 7 and 6.  We store these as entries in a
+    ; table indexed by disk nibble value, so we can efficiently test them
+    ; during disk reads by checking 6502 status flags (N and V)
 
     LDA bit6_value
-    ; A contains the 6-bit logical value we are masking
     ASL
     ASL
     STA bit6_value
@@ -541,19 +583,11 @@ done2:
     STA MOTOROFF
     BRK
 
+; Begin audio playback
 prepare_read:
     LDA READ
 
-;    LDX #$FF
-;    TXS
-;    INX
-;    LDA #$00
-;@zero_stack:
-;    STA $100,X
-;    INX
-;    BNE @zero_stack
-
-    LDY #$60 ; XXX
+    LDY #$60
     ; read 5 sync bytes
 @loop:
     ldx #$5
@@ -567,7 +601,7 @@ prepare_read:
 
     ; sync to track start
 @startsync:
-    LDA SHIFTBASE,Y ; XXX
+    LDA SHIFTBASE,Y
     BPL @startsync
 @tryd5:
     EOR #$D5
@@ -580,25 +614,24 @@ prepare_read:
     BNE @tryd5 ; 2/3
     ; 14 cycles
 
-
-    ;LDX #$00
-; need 3 variants
+; We now enter a state machine reading sectors.  We need need 3 variants
+; of sector reading:
+;
 ; 1. straight playback
-; 2. push onto stack, previous to phase 1 on
-; 3. pull from stack, during phase 1 on
+; 2. push onto stack, previous to a sector with phase 1 on
+; 3. pull from stack, during a sector with phase 1 on
 
-; 29 cycles in common case
+; 24 cycles in common case
 disk_read_loop_nopush:
     LDY SHIFT ; 4
-    ; should normally fall through, will occasionally loop once when
-    ; we have slipped a cycle and the nibble is not ready after 31
-    ; cycles
+    ; should normally fall through, will occasionally loop but should only be once
     BPL disk_read_loop_nopush ; 2/3
 
 decode_track_ref0:
     LDA DECODE_TRACK0,Y
     ;STA ZPDUMMY
 
+    ; bit 7 signals whether we should toggle speaker
     BPL @notick ; 2/3
     STA $C030 ; 4
     BMI @next
@@ -611,42 +644,35 @@ decode_track_ref0:
 @next:
     ; NOP
     
-    ;INX ; 2 count how many we have read
-    ;BEQ read_step_head_nopush ; in case we overflow
-
     CPY #$AA ; end of sector marker
     BNE disk_read_loop_nopush ; 2/3
     ; falls through when it's time to step the head
 
+; we've read the sector, now flip soft switches to potentially begin stepping the head
 read_step_head_nopush:
+    ; toggle next phase switches
     INC loopctr ; 5
     LDX loopctr ; 3
-
     LDY STEP_TABLE1,X ; 4
-    LDA $C000,Y ; 4 toggle next phase switch
+    LDA $C000,Y ; 4
     LDY STEP_TABLE2,X ; 4
-    LDA $C000,Y ; 4 toggle next phase switch
-
-    LDX #$00
+    LDA $C000,Y ; 4
 
     ; if STEP_TABLE2 == 89 then we are entering the last write sequence
     ; prior to enabling phase 1, so we need to transition to pushing stack values
     CPY #$89+SLOTn0
     BNE disk_read_loop_nopush ; 3
     ; falls through if we're entering the last write sequence prior to enabling phase 1
-    ; 31 cycles when falling through
 
 ; 29 cycles in common case
 disk_read_loop_push:
     LDY SHIFT ; 4
-    ; should normally fall through, will occasionally loop once when
-    ; we have slipped a cycle and the nibble is not ready after 31
-    ; cycles
+    ; should normally fall through, will occasionally loop once
     BPL disk_read_loop_push ; 2/3
 
 decode_track_ref1:
     LDA DECODE_TRACK0,Y
-    PHA
+    PHA ; also push data to the stack so we can use it during the next sector when phase 1 is active and no data is available on disk.
 
     BPL @notick ; 2/3
     STA $C030 ; 4
@@ -659,7 +685,6 @@ decode_track_ref1:
 
 @next:
     INX ; 2 count how many we are pushing
-    ;BEQ read_step_head_push ; in case we overflow
 
     CPY #$AA ; end of sector marker
     BNE disk_read_loop_push ; 2/3
@@ -669,26 +694,29 @@ read_step_head_push:
     TXA
     PHA ; store how many bytes we pushed
 
+    ; toggle next phase switches
     INC loopctr ; 5
     LDX loopctr ; 3
     LDY STEP_TABLE1,X ; 4
-    LDA $C000,Y ; 4 toggle next phase switch
+    LDA $C000,Y ; 4 
 
     LDY STEP_TABLE2,X ; 4
-    LDA $C000,Y ; 4 toggle next phase switch
+    LDA $C000,Y ;
 
+    ; retrieve how many bytes we pushed
     PLA
     TAX
 
     ; fall through to disk_read_loop_pull since phase 1 will be on and we couldn't
     ; write anything sensible
 
-; 28 cycles instead of 32 - so we know we'll finish ahead of schedule
+; 28 cycles instead of 32 - so we know we'll finish ahead of schedule and haven't
+; skipped past the sync bytes
 disk_read_loop_pull:
+    ; we have some free cycles, so check for a keypress to terminate playback
     BIT $C000
     BMI restart1
 
-    ; keep same timing padding in all 3 variants
     PLP
     NOP 
     
@@ -708,8 +736,9 @@ disk_read_loop_pull:
     BNE disk_read_loop_pull ; 2/3
 
 ; resync with sector lead
+; We use D5 AB as the sector header
 @startsync:
-    LDA SHIFT ; XXX
+    LDA SHIFT ; TODO: not indexing by SLOTn0
     BPL @startsync
 @tryd5:
     EOR #$D5
@@ -720,25 +749,23 @@ disk_read_loop_pull:
     CMP #$AB ; 2
     BNE @tryd5 ; 2/3
 
-    ; XXX need to add one more padding byte at start of sector
-
-    ; falls through when it's time to step the head
+    ; TODO; need to add one more padding byte at start of sector?
 
 read_step_head_pull:
+    ;  toggle next phase switches
     INC loopctr ; 5
     LDX loopctr ; 3
     LDY STEP_TABLE1,X ; 4
-    LDA $C000,Y ; 4 toggle next phase switch
-
+    LDA $C000,Y ; 4
     LDY STEP_TABLE2,X ; 4
-    LDA $C000,Y ; 4 toggle next phase switch
+    LDA $C000,Y ; 4
 
     ; are we about to transition away from a push/pull phase 1 cycle?
     CPY #$84+SLOTn0
+    ; nope
     BNE disk_read_loop_push ; 3
 
-    LDX #$00
-
+    ; We're done with phase 1, go back to regular sector reads
     JMP disk_read_loop_nopush
 
 done:
@@ -748,6 +775,8 @@ done:
 restart1:
     JMP seek_track0
 
+; Read audio data from ProDOS file and stage it into the slinky memory
+; so we can stream it back when writing the audio track.
 load_slinky:
     LDX #$00
     STX SLINKY_ADDRL
@@ -774,7 +803,7 @@ load_slinky:
     BNE @error
     SEC ; signal EOF
 
-    ; XXX not careful about EOF
+    ; TODO: not careful about EOF
 @store_data:
     LDX #$00
 @0:
@@ -789,39 +818,6 @@ load_slinky:
 @error:
     BRK
 
-;@play:
-;    LDA #$00
-;    STA SLINKY_ADDRL
-;    STA SLINKY_ADDRM
-;    STA SLINKY_ADDRH
-;
-;playback:
-;    LDA SLINKY_DATA
-;    ROR
-;
-;    BCC @notick ; 2/3
-;    STA $C030 ; 4
-;    BCS @next ; 3 always
-;
-;@notick:
-;    ; 3+6 = 9
-;    NOP
-;    NOP
-;    NOP
-;
-;@next:
-;    STA $401
-;    ; end playback on keypress
-;    BIT $C000
-;    BMI @done
-;    NOP
-;    NOP
-;    JMP playback
-;
-;@done:
-;    BIT $C010
-;    RTS
-
 open_cmdlist:
     .byte $03 ; param_count
     .addr pathname
@@ -831,7 +827,7 @@ open_refnum:
 
 pathname:
     .byte 10
-    .asciiz "SOUND.DATA" ; XXX unneeded trailing 0
+    .asciiz "SOUND.DATA" ; TODO: unneeded trailing 0
 
 read_cmdlist:
     .byte $04 ; param_count
